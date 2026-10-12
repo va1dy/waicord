@@ -1,7 +1,7 @@
 [package]
 name = "waicord-desktop"
 version = "0.1.0"
-description = "waicord — lightweight chat client"
+description = "waicord, a lightweight chat client"
 edition = "2021"
 
 [build-dependencies]

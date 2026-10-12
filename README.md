@@ -27,14 +27,14 @@
 ## Why
 
 Discord's official desktop client is an Electron app: heavy, slow to start and
-hungry for RAM. `waicord` aims to be the opposite — a small, sharp client that
+hungry for RAM. `waicord` aims to be the opposite: a small, sharp client that
 opens instantly and stays out of your way.
 
-- **Fast startup** — Tauri uses the OS webview, the core is compiled Rust
-- **Small footprint** — no bundled Chromium, binary measured in MB, not hundreds
-- **Native feel** — real window controls, system tray, native notifications
-- **Secure by default** — capability-scoped IPC, no Node.js in production
-- **Yours** — open source, MIT licensed, no telemetry
+- **Fast startup**: Tauri uses the OS webview, the core is compiled Rust
+- **Small footprint**: no bundled Chromium, binary measured in MB, not hundreds
+- **Native feel**: real window controls, system tray, native notifications
+- **Secure by default**: capability-scoped IPC, no Node.js in production
+- **Yours**: open source, MIT licensed, no telemetry
 
 ## Tech stack
 
