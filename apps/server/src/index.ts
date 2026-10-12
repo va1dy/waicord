@@ -201,6 +201,18 @@ function isOnline(userId: string): boolean {
   return (online.get(userId) ?? 0) > 0;
 }
 
+type AttachmentItem = string | { url: string; name?: string };
+
+function normalizeAttachments(raw: unknown): AttachmentItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((a): a is AttachmentItem => {
+      if (typeof a === "string") return a.length > 0;
+      return !!a && typeof a === "object" && typeof (a as { url?: unknown }).url === "string";
+    })
+    .slice(0, 8);
+}
+
 function friendIds(userId: string): string[] {
   const rows = db
     .query(
@@ -239,11 +251,10 @@ interface MessageRow {
   avatar_url: string | null;
 }
 
-function parseAttachments(raw: string | null | undefined): string[] {
+function parseAttachments(raw: string | null | undefined): AttachmentItem[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string").slice(0, 8) : [];
+    return normalizeAttachments(JSON.parse(raw));
   } catch {
     return [];
   }
@@ -405,7 +416,7 @@ server = Bun.serve({
       if (body.avatar_url !== undefined) {
         const a = body.avatar_url;
         if (a === null || a === "") avatar = null;
-        else if (a.startsWith("data:image/") && a.length <= 300_000) avatar = a;
+        else if (a.startsWith("data:image/") && a.length <= 400_000) avatar = a;
         else return json({ error: "Аватар: data-url изображения до 300КБ" }, 400);
       }
 
@@ -453,6 +464,10 @@ server = Bun.serve({
       if (!existsSync(path)) return json({ error: "Файл не найден" }, 404);
       const bytes = readFileSync(path);
       const ext = extname(stored).toLowerCase();
+      const row = db.query(`SELECT name FROM uploads WHERE id = ?`).get(stored.replace(/\.[^.]+$/, "")) as
+        | { name: string }
+        | undefined;
+      const filename = row?.name ?? stored;
       const mime =
         ext === ".png"
           ? "image/png"
@@ -464,10 +479,14 @@ server = Bun.serve({
                 ? "image/jpeg"
                 : ext === ".mp4"
                   ? "video/mp4"
-                  : "application/octet-stream";
+                  : ext === ".webm"
+                    ? "video/webm"
+                    : "application/octet-stream";
+      const asciiName = filename.replace(/[^\x20-\x7e]/g, "_");
       return new Response(bytes, {
         headers: {
           "Content-Type": mime,
+          "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
           "Access-Control-Allow-Origin": "*",
           "Cache-Control": "public, max-age=86400",
         },
@@ -524,7 +543,7 @@ server = Bun.serve({
       if (!channel) return json({ error: "Канал не найден" }, 404);
       const body = (await req.json().catch(() => null)) as { content?: string; attachments?: string[] } | null;
       const content = body?.content?.trim() ?? "";
-      const attachments = (body?.attachments ?? []).filter((a) => typeof a === "string").slice(0, 8);
+      const attachments = normalizeAttachments(body?.attachments);
       if (!content && attachments.length === 0) return json({ error: "Пустое сообщение" }, 400);
       if (content.length > 2000) return json({ error: "Максимум 2000 символов" }, 400);
 
@@ -788,7 +807,7 @@ server = Bun.serve({
       if (!isMember(conversationId, user.id)) return json({ error: "Нет доступа" }, 403);
       const body = (await req.json().catch(() => null)) as { content?: string; attachments?: string[] } | null;
       const content = body?.content?.trim() ?? "";
-      const attachments = (body?.attachments ?? []).filter((a) => typeof a === "string").slice(0, 8);
+      const attachments = normalizeAttachments(body?.attachments);
       if (!content && attachments.length === 0) return json({ error: "Пустое сообщение" }, 400);
       if (content.length > 2000) return json({ error: "Максимум 2000 символов" }, 400);
 
@@ -877,7 +896,7 @@ server = Bun.serve({
       }
 
       const content = (parsed.content ?? "").trim().slice(0, 2000);
-      const attachments = (parsed.attachments ?? []).filter((a) => typeof a === "string").slice(0, 8);
+      const attachments = normalizeAttachments(parsed.attachments);
       if (!content && attachments.length === 0) return;
 
       if (parsed.type === "message" && parsed.channel_id) {

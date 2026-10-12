@@ -2,6 +2,7 @@
   import { tick } from "svelte";
   import Avatar from "./Avatar.svelte";
   import { app } from "../lib/app.svelte";
+  import { videoToGif } from "../lib/gif";
 
   const me = $derived(app.session?.user);
 
@@ -10,6 +11,7 @@
   let bio = $state("");
   let avatarUrl = $state<string | null>(null);
   let saving = $state(false);
+  let avatarBusy = $state(false);
   let error = $state("");
   let fileEl = $state<HTMLInputElement | null>(null);
   let nameInput = $state<HTMLInputElement | null>(null);
@@ -34,39 +36,78 @@
     return () => window.removeEventListener("keydown", onKeydown);
   });
 
-  function onAvatarFile(file: File) {
+  function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function onAvatarFile(file: File) {
     error = "";
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const max = 300;
-      const scale = Math.min(1, max / Math.max(img.width, img.height));
-      const w = Math.max(1, Math.round(img.width * scale));
-      const h = Math.max(1, Math.round(img.height * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        URL.revokeObjectURL(url);
-        error = "Не удалось обработать изображение";
+    avatarBusy = true;
+    try {
+      if (file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif")) {
+        const data = await fileToDataUrl(file);
+        if (data.length > 400_000) {
+          error = "Gif слишком большой — до 300КБ или загрузи видео, конвертируем";
+        } else {
+          avatarUrl = data;
+        }
         return;
       }
-      ctx.drawImage(img, 0, 0, w, h);
-      const data = canvas.toDataURL("image/jpeg", 0.85);
-      if (data.length > 400_000) {
-        error = "Картинка слишком большая — выбери поменьше";
-        URL.revokeObjectURL(url);
+      if (file.type.startsWith("video/")) {
+        const data = await videoToGif(file);
+        if (data.length > 400_000) {
+          error = "Gif из видео получился больше 300КБ — возьми видео поменьше";
+        } else {
+          avatarUrl = data;
+        }
         return;
       }
-      avatarUrl = data;
-      URL.revokeObjectURL(url);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      error = "Не удалось прочитать изображение";
-    };
-    img.src = url;
+      await resizeImage(file);
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Не удалось обработать файл";
+    } finally {
+      avatarBusy = false;
+    }
+  }
+
+  function resizeImage(file: File) {
+    return new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const max = 300;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        URL.revokeObjectURL(url);
+        if (!ctx) {
+          reject(new Error("Не удалось обработать изображение"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const data = canvas.toDataURL("image/jpeg", 0.85);
+        if (data.length > 400_000) {
+          reject(new Error("Картинка слишком большая — выбери поменьше"));
+          return;
+        }
+        avatarUrl = data;
+        resolve();
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Не удалось прочитать изображение"));
+      };
+      img.src = url;
+    });
   }
 
   async function save(event: Event) {
@@ -103,9 +144,9 @@
       <div class="mb-4 flex items-center gap-3">
         <Avatar username={me.username} url={avatarUrl} size={56} />
         <div class="flex flex-col gap-1">
-          <input bind:this={fileEl} type="file" accept="image/*" class="hidden" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) onAvatarFile(f); (e.currentTarget as HTMLInputElement).value = ""; }} />
-          <button type="button" onclick={() => fileEl?.click()} class="h-8 rounded-lg border border-line bg-panel-soft px-3 text-[12px] font-medium text-fg transition hover:bg-panel">
-            Сменить аватар
+          <input bind:this={fileEl} type="file" accept="image/*,video/*,.gif" class="hidden" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) void onAvatarFile(f); (e.currentTarget as HTMLInputElement).value = ""; }} />
+          <button type="button" disabled={avatarBusy} onclick={() => fileEl?.click()} class="h-8 rounded-lg border border-line bg-panel-soft px-3 text-[12px] font-medium text-fg transition hover:bg-panel disabled:opacity-50">
+            {avatarBusy ? "Конвертирую…" : "Сменить аватар"}
           </button>
           {#if avatarUrl}
             <button type="button" onclick={() => (avatarUrl = null)} class="h-7 text-[11px] text-fg-muted transition hover:text-danger">

@@ -3,7 +3,15 @@
   import Avatar from "./Avatar.svelte";
   import { app } from "../lib/app.svelte";
   import { call } from "../lib/call.svelte";
-  import { searchGifs, uploadFile, type Message } from "../lib/api";
+  import {
+    attName,
+    attUrl,
+    resolveAttUrl,
+    searchGifs,
+    uploadFile,
+    type Attachment,
+    type Message,
+  } from "../lib/api";
 
   const active = $derived(app.active);
   const meId = $derived(app.session?.user.id ?? "");
@@ -189,7 +197,10 @@
     uploading = true;
     sendError = "";
     try {
-      await app.sendMessage(text, files.map((f) => f.url));
+      await app.sendMessage(
+        text,
+        files.map((f): Attachment => ({ url: f.url, name: f.name })),
+      );
       resetComposer();
       focusInput();
     } catch (error) {
@@ -249,23 +260,27 @@
           {#each group.items as item (item.id)}
             {#if item.attachments?.length}
               <div class="mt-1 flex flex-wrap gap-1.5">
-                {#each item.attachments as src (src)}
-                  {#if src.endsWith(".gif") || src.includes("giphy")}
-                    <img src={src} alt="gif" class="max-h-40 rounded-lg border border-line/50 object-contain" />
-                  {:else if src.match(/\.(png|jpe?g|webp|avif)$/i)}
-                    <img src={src} alt="вложение" class="max-h-64 rounded-lg border border-line/50 object-contain" />
-                  {:else if src.match(/\.(webm|mp4|mov)$/i)}
+                {#each item.attachments as att (attUrl(att))}
+                  {@const url = resolveAttUrl(att, app.base)}
+                  {@const name = attName(att)}
+                  {#if name.endsWith(".gif") || attUrl(att).includes("giphy")}
+                    <img src={url} alt="gif" class="max-h-40 rounded-lg border border-line/50 object-contain" />
+                  {:else if name.match(/\.(png|jpe?g|webp|avif|svg)$/i)}
+                    <img src={url} alt={name} class="max-h-64 rounded-lg border border-line/50 object-contain" />
+                  {:else if name.match(/\.(webm|mp4|mov)$/i)}
                     <!-- svelte-ignore a11y_media_has_caption -->
-                    <video src={src} controls class="max-h-64 rounded-lg border border-line/50" aria-label="видео"></video>
+                    <video src={url} controls class="max-h-64 rounded-lg border border-line/50" aria-label={name}></video>
                   {:else}
                     <a
-                      href={src}
+                      href={url}
+                      download={name}
                       target="_blank"
                       rel="noreferrer"
+                      title="Скачать {name}"
                       class="flex items-center gap-1.5 rounded-lg border border-line bg-panel-soft px-2.5 py-1.5 text-[12px] text-accent transition hover:bg-panel"
                     >
-                      <svg viewBox="0 0 24 24" class="size-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
-                      файл
+                      <svg viewBox="0 0 24 24" class="size-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                      <span class="max-w-40 truncate">{name}</span>
                     </a>
                   {/if}
                 {/each}

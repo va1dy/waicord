@@ -20,12 +20,15 @@ class CallManager {
   localStream = $state<MediaStream | null>(null);
   remoteStream = $state<MediaStream | null>(null);
   micOn = $state(true);
-  camOn = $state(true);
+  camOn = $state(false);
   screenOn = $state(false);
   error = $state("");
 
   private pc: RTCPeerConnection | null = null;
   private pendingOffer: RTCSessionDescriptionInit | null = null;
+  private isOfferer = false;
+  private videoTrack: MediaStreamTrack | null = null;
+  private camTrack: MediaStreamTrack | null = null;
   private screenTrack: MediaStreamTrack | null = null;
 
   displayName(): string {
@@ -48,11 +51,12 @@ class CallManager {
     if (this.phase !== "incoming") return;
     this.error = "";
     try {
-      await this.setupMedia();
+      await this.setupAudio();
       this.phase = "active";
+      app.sendSignal(this.peerId, { kind: "call-accept", callId: this.callId });
       await this.flushPendingOffer();
     } catch {
-      this.error = "Нет доступа к камере/микрофону";
+      this.error = "Нет доступа к микрофону";
       this.reject();
     }
   }
@@ -76,32 +80,44 @@ class CallManager {
     this.micOn = track.enabled;
   }
 
-  toggleCam() {
-    const track = this.localStream?.getVideoTracks()[0];
-    if (!track) return;
-    track.enabled = !track.enabled;
-    this.camOn = track.enabled;
+  async toggleCam() {
+    if (this.phase !== "active") return;
+    try {
+      if (this.camOn) {
+        await this.setVideoTrack(null);
+        this.camTrack?.stop();
+        this.camTrack = null;
+        this.camOn = false;
+      } else {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 360 } },
+        });
+        const track = stream.getVideoTracks()[0]!;
+        this.camTrack = track;
+        await this.setVideoTrack(track);
+        this.camOn = true;
+      }
+    } catch {
+      this.error = "Нет доступа к камере";
+    }
   }
 
   async toggleScreen() {
     if (this.phase !== "active") return;
-    const sender = this.pc?.getSenders().find((s) => s.track?.kind === "video");
     try {
       if (this.screenOn) {
-        const cam = this.localStream?.getVideoTracks()[0] ?? null;
-        if (sender) await sender.replaceTrack(cam);
+        await this.setVideoTrack(this.camOn ? this.camTrack : null);
         this.screenTrack?.stop();
         this.screenTrack = null;
         this.screenOn = false;
       } else {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        const track = stream.getVideoTracks()[0];
-        if (sender) await sender.replaceTrack(track);
-        else this.localStream?.addTrack(track);
+        const track = stream.getVideoTracks()[0]!;
+        this.screenTrack = track;
         track.onended = () => {
           void this.toggleScreen();
         };
-        this.screenTrack = track;
+        await this.setVideoTrack(track);
         this.screenOn = true;
       }
     } catch {
@@ -130,6 +146,7 @@ class CallManager {
       this.peerAvatar = event.from_avatar_url;
       this.conversationId = payload.conversationId ?? "";
       this.error = "";
+      this.isOfferer = false;
       this.phase = "incoming";
       return;
     }
@@ -139,11 +156,11 @@ class CallManager {
     if (kind === "call-accept") {
       if (this.phase !== "outgoing") return;
       try {
-        await this.setupMedia();
+        await this.setupAudio();
         this.phase = "active";
         await this.negotiate();
       } catch {
-        this.error = "Нет доступа к камере/микрофону";
+        this.error = "Нет доступа к микрофону";
         this.hangup();
       }
       return;
@@ -166,6 +183,11 @@ class CallManager {
       return;
     }
 
+    if (kind === "renegotiate") {
+      if (this.isOfferer && this.phase === "active") await this.negotiate();
+      return;
+    }
+
     if (kind === "rtc-offer") {
       this.pendingOffer = payload.sdp ?? null;
       await this.flushPendingOffer();
@@ -173,7 +195,7 @@ class CallManager {
     }
 
     if (kind === "rtc-answer") {
-      if (payload.sdp) await this.pc?.setRemoteDescription(payload.sdp);
+      if (payload.sdp && this.pc) await this.pc.setRemoteDescription(payload.sdp);
       return;
     }
 
@@ -188,20 +210,32 @@ class CallManager {
     }
   }
 
-  private async setupMedia() {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: { width: { ideal: 640 }, height: { ideal: 360 } },
-    });
+  private async setupAudio() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.localStream = stream;
     this.micOn = true;
-    this.camOn = true;
+    this.camOn = false;
     this.screenOn = false;
     this.ensurePc();
-    for (const track of stream.getTracks()) {
-      if (!this.pc!.getSenders().some((s) => s.track === track)) {
-        this.pc!.addTrack(track, stream);
-      }
+    const audio = stream.getAudioTracks()[0];
+    if (audio && !this.pc!.getSenders().some((s) => s.track === audio)) {
+      this.pc!.addTrack(audio, stream);
+    }
+  }
+
+  private async setVideoTrack(track: MediaStreamTrack | null) {
+    const pc = this.ensurePc();
+    this.videoTrack = track;
+    const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+    if (sender) {
+      await sender.replaceTrack(track);
+      return;
+    }
+    if (track) {
+      const stream = this.localStream ?? new MediaStream();
+      if (!this.localStream) this.localStream = stream;
+      stream.addTrack(track);
+      pc.addTrack(track, stream);
     }
   }
 
@@ -216,8 +250,13 @@ class CallManager {
     pc.ontrack = (e) => {
       this.remoteStream = e.streams[0] ?? new MediaStream([e.track]);
     };
+    pc.onnegotiationneeded = () => {
+      if (this.phase !== "active") return;
+      if (this.isOfferer) void this.negotiate();
+      else if (this.peerId) app.sendSignal(this.peerId, { kind: "renegotiate", callId: this.callId });
+    };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      if (pc.connectionState === "failed") {
         if (this.phase === "active") this.reset();
       }
     };
@@ -227,6 +266,7 @@ class CallManager {
 
   private async negotiate() {
     const pc = this.ensurePc();
+    this.isOfferer = true;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     app.sendSignal(this.peerId, { kind: "rtc-offer", callId: this.callId, sdp: pc.localDescription });
@@ -255,11 +295,15 @@ class CallManager {
     this.pc?.close();
     this.pc = null;
     this.localStream?.getTracks().forEach((t) => t.stop());
+    this.camTrack?.stop();
     this.screenTrack?.stop();
+    this.camTrack = null;
     this.screenTrack = null;
+    this.videoTrack = null;
     this.localStream = null;
     this.remoteStream = null;
     this.pendingOffer = null;
+    this.isOfferer = false;
     this.phase = "idle";
     this.callId = "";
     this.peerId = "";
@@ -267,7 +311,7 @@ class CallManager {
     this.peerAvatar = null;
     this.conversationId = "";
     this.micOn = true;
-    this.camOn = true;
+    this.camOn = false;
     this.screenOn = false;
   }
 }

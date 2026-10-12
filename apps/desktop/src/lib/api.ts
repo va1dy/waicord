@@ -30,13 +30,30 @@ export interface Channel {
   created_at: number;
 }
 
+export type Attachment = string | { url: string; name?: string };
+
+export function attUrl(a: Attachment): string {
+  return typeof a === "string" ? a : a.url;
+}
+
+export function attName(a: Attachment): string {
+  if (typeof a === "string") return decodeURIComponent(a.split("/").pop() ?? "файл");
+  return a.name || decodeURIComponent(a.url.split("/").pop() ?? "файл");
+}
+
+export function resolveAttUrl(a: Attachment, base: string): string {
+  const url = attUrl(a);
+  if (url.startsWith("/")) return base.replace(/\/$/, "") + url;
+  return url;
+}
+
 export interface Message {
   id: string;
   channel_id?: string;
   conversation_id?: string;
   content: string;
   created_at: number;
-  attachments?: string[];
+  attachments?: Attachment[];
   user: UserBrief;
 }
 
@@ -136,7 +153,7 @@ export async function sendChannelMessage(
   token: string,
   channelId: string,
   content: string,
-  attachments: string[] = [],
+  attachments: Attachment[] = [],
 ): Promise<{ message: Message }> {
   return request(base, `/api/channels/${channelId}/messages`, {
     method: "POST",
@@ -209,7 +226,7 @@ export async function sendDmMessage(
   token: string,
   conversationId: string,
   content: string,
-  attachments: string[] = [],
+  attachments: Attachment[] = [],
 ): Promise<{ message: Message }> {
   return request(base, `/api/dms/${conversationId}/messages`, {
     method: "POST",
@@ -224,11 +241,12 @@ export async function uploadFile(
   file: File,
 ): Promise<{ url: string; name: string; size: number }> {
   const data = await fileToBase64(file);
-  return request(base, "/api/upload", {
+  const res = await request<{ url: string; name: string; size: number }>(base, "/api/upload", {
     method: "POST",
     headers: auth(token),
     body: JSON.stringify({ name: file.name, data }),
   });
+  return { ...res, url: base.replace(/\/$/, "") + res.url };
 }
 
 function fileToBase64(file: File): Promise<string> {

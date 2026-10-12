@@ -22,6 +22,7 @@ import {
   type Message,
   type Session,
   type User,
+  type Attachment,
 } from "./api";
 import { call } from "./call.svelte";
 
@@ -287,7 +288,7 @@ class AppState {
     await this.ensureHistory();
   }
 
-  async sendMessage(content: string, attachments: string[] = []) {
+  async sendMessage(content: string, attachments: Attachment[] = []) {
     if (!this.session) return;
     const text = content.trim();
     if (!text && attachments.length === 0) return;

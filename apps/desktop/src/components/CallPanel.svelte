@@ -51,7 +51,11 @@
         {/if}
         <div class="relative mb-3 overflow-hidden rounded-xl bg-black/70" style="aspect-ratio:16/9">
           <video bind:this={remoteVideo} autoplay playsinline class="h-full w-full object-contain"></video>
-          <video bind:this={localVideo} autoplay playsinline muted class="absolute right-2 bottom-2 w-32 rounded-lg border border-line object-cover"></video>
+          {#if call.camOn || call.screenOn}
+            <video bind:this={localVideo} autoplay playsinline muted class="absolute right-2 bottom-2 w-32 rounded-lg border border-line object-cover"></video>
+          {:else}
+            <video bind:this={localVideo} class="hidden"></video>
+          {/if}
           <p class="absolute top-2 left-2 rounded-lg bg-black/50 px-2 py-1 text-[12px] font-medium text-white">{call.displayName()}</p>
         </div>
         <div class="flex items-center justify-center gap-2">
