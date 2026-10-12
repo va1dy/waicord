@@ -1,6 +1,6 @@
 # waicord server
 
-Self-hosted сервер waicord: аккаунты, каналы, сообщения (REST + WebSocket).
+Self-hosted сервер waicord: аккаунты, каналы, друзья, ЛС и группы, сообщения (REST + WebSocket).
 Ноль зависимостей — только Bun и SQLite.
 
 ## Запуск локально
@@ -65,4 +65,31 @@ systemctl enable --now waicord
 | POST | `/api/channels` | `{name}` — создать канал (Bearer) |
 | GET | `/api/channels/:id/messages` | история (Bearer, `?limit=`) |
 | POST | `/api/channels/:id/messages` | `{content}` — отправить (Bearer) |
-| WS | `/ws?token=` | live-события `{type:"message", message}` |
+| GET | `/api/friends` | друзья + заявки (Bearer) |
+| POST | `/api/friends/requests` | `{username}` — отправить заявку (Bearer) |
+| POST | `/api/friends/requests/:id/accept` | принять заявку (Bearer) |
+| POST | `/api/friends/requests/:id/decline` | отклонить/отменить (Bearer) |
+| DELETE | `/api/friends/:userId` | удалить из друзей (Bearer) |
+| GET | `/api/dms` | список ЛС и групп (Bearer) |
+| POST | `/api/dms` | `{usernames[], name?, kind?}` — ЛС/группа (Bearer) |
+| GET | `/api/dms/:id/messages` | история ЛС (Bearer, `?limit=`) |
+| POST | `/api/dms/:id/messages` | `{content}` — отправить в ЛС (Bearer) |
+| WS | `/ws?token=` | live-события (см. ниже) |
+
+### WebSocket-события
+
+Входящие (от клиента): `{type:"message", channel_id, content}` или `{type:"dm", conversation_id, content}`.
+
+Исходящие (broadcast):
+
+| type | payload | когда |
+| --- | --- | --- |
+| `message` | `{message}` | новое сообщение в канале (всем) |
+| `dm` | `{message}` | новое ЛС/групповое сообщение (участникам) |
+| `friend_request` | `{from}` | заявка в друзья (получателю) |
+| `friend_accept` | `{from}` | заявка принята (отправителю) |
+| `friend_remove` | `{from}` | удаление из друзей |
+| `dm_create` | `{conversation}` | создана группа с тобой |
+| `presence` | `{user_id, online}` | друг вышел/зашёл (друзьям) |
+
+Presence хранится в памяти процесса (сбрасывается при рестарте).
