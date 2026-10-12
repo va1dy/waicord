@@ -1,0 +1,16 @@
+{
+  "name": "waicord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord bot with modern web dashboard",
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "lint": "pnpm --parallel --filter './apps/*' lint",
+    "typecheck": "pnpm --parallel --filter './apps/*' typecheck",
+    "test": "pnpm --parallel --filter './apps/*' test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.12.3"
+}
