@@ -103,7 +103,7 @@
 
   <div class="relative z-10 flex min-h-full items-center justify-center p-6">
     <div
-      class="rise w-full max-w-[376px] rounded-2xl border border-line/80 bg-panel/70 p-8 text-center shadow-[0_30px_70px_-40px_rgb(0_0_0_0.9)] backdrop-blur-sm"
+      class="rise w-full max-w-[376px] rounded-2xl border border-line/60 bg-panel/40 p-8 text-center shadow-[0_30px_70px_-40px_rgb(0_0_0_0.9)] backdrop-blur-xl"
       style="animation-delay: 100ms"
     >
     <img src="/waicord.svg" alt="" class="mx-auto size-14 rounded-2xl" aria-hidden="true" />
