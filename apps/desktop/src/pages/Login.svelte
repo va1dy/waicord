@@ -2,14 +2,23 @@
   import Button from "../components/ui/Button.svelte";
   import Field from "../components/ui/Field.svelte";
   import GlowCanvas from "../components/GlowCanvas.svelte";
-  import { login } from "../lib/api";
+  import { clearSession, health, loadSession, login, me, normalizeServer, register, saveSession, type Session } from "../lib/api";
 
   type Mode = "waicord" | "discord";
 
   let mode = $state<Mode>(
     typeof localStorage !== "undefined" && localStorage.getItem("waicord.mode") === "discord" ? "discord" : "waicord",
   );
-  let view = $state<"login" | "register">("login");
+  let session = $state<Session | null>(loadSession());
+
+  let waicordStep = $state<"connect" | "account">("connect");
+  let accountView = $state<"login" | "register">("login");
+  let pendingServer = $state("");
+
+  let serverInput = $state("");
+  let tokenInput = $state("");
+  let serverError = $state("");
+  let connecting = $state(false);
 
   let identifier = $state("");
   let password = $state("");
@@ -23,14 +32,12 @@
   let regPassword = $state("");
   let regError = $state("");
 
-  let server = $state("");
-
   function switchMode(next: Mode) {
     if (mode === next) return;
     mode = next;
-    view = "login";
+    waicordStep = "connect";
     formError = "";
-    regError = "";
+    serverError = "";
     try {
       localStorage.setItem("waicord.mode", next);
     } catch {
@@ -38,20 +45,59 @@
     }
   }
 
-  async function submit(event: SubmitEvent) {
+  function logout() {
+    clearSession();
+    session = null;
+    waicordStep = "connect";
+    accountView = "login";
+  }
+
+  async function connect(event: SubmitEvent) {
+    event.preventDefault();
+    serverError = "";
+    const base = normalizeServer(serverInput);
+    if (!base) {
+      serverError = "Укажи адрес сервера";
+      return;
+    }
+    connecting = true;
+    try {
+      await health(base);
+      const token = tokenInput.trim();
+      if (token) {
+        try {
+          const { user } = await me(base, token);
+          const next: Session = { server: base, token, user };
+          saveSession(next);
+          session = next;
+          return;
+        } catch {
+          /* токен не подошёл — идём по логину/паролю */
+        }
+      }
+      pendingServer = base;
+      waicordStep = "account";
+      accountView = "login";
+    } catch (error) {
+      serverError = error instanceof Error ? error.message : "Сервер недоступен";
+    } finally {
+      connecting = false;
+    }
+  }
+
+  async function submitAccount(event: SubmitEvent) {
     event.preventDefault();
     identifierError = identifier.trim() ? "" : "Введите логин или email";
     passwordError = password ? "" : "Введите пароль";
     formError = "";
-    if (identifierError || passwordError) {
-      const firstInvalid = identifierError ? "identifier" : "password";
-      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`input[name=${firstInvalid}]`)?.focus());
-      return;
-    }
+    if (identifierError || passwordError) return;
 
     loading = true;
     try {
-      await login(identifier.trim(), password);
+      const { token, user } = await login(pendingServer, identifier.trim(), password);
+      const next: Session = { server: pendingServer, token, user };
+      saveSession(next);
+      session = next;
     } catch (error) {
       formError = error instanceof Error ? error.message : "Не удалось войти";
     } finally {
@@ -61,7 +107,25 @@
 
   function submitRegister(event: SubmitEvent) {
     event.preventDefault();
-    regError = "Регистрация появится после подключения API";
+    regError = "";
+    loading = true;
+    register(pendingServer, regUsername.trim(), regEmail.trim(), regPassword)
+      .then(({ token, user }) => {
+        const next: Session = { server: pendingServer, token, user };
+        saveSession(next);
+        session = next;
+      })
+      .catch((error: unknown) => {
+        regError = error instanceof Error ? error.message : "Не удалось зарегистрироваться";
+      })
+      .finally(() => {
+        loading = false;
+      });
+  }
+
+  function submitDiscord(event: SubmitEvent) {
+    event.preventDefault();
+    formError = "Вход в Discord появится после подключения";
   }
 </script>
 
@@ -110,40 +174,90 @@
         </button>
       </div>
 
-      {#if mode === "discord"}
+      {#if session}
+        <div class="mx-auto grid size-16 place-items-center rounded-full bg-accent font-display text-2xl font-semibold text-ink">
+          {session.user.username[0]?.toUpperCase() ?? "?"}
+        </div>
+        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Вы вошли</h2>
+        <p class="mt-1.5 text-sm text-fg-muted">
+          {session.user.username} · {session.server}
+        </p>
+        <p class="mt-4 text-[13px] leading-relaxed text-fg-muted/80">
+          Каркас чата появится следующим шагом — сессия и сервер уже подключены.
+        </p>
+        <button
+          type="button"
+          onclick={logout}
+          class="mt-6 text-[13px] font-medium text-danger transition hover:text-danger/80"
+        >
+          Выйти
+        </button>
+      {:else if mode === "discord"}
         <svg width="44" height="44" viewBox="0 0 24 24" fill="#5865f2" class="mx-auto" aria-hidden="true">
           <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
         </svg>
         <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Вход в Discord</h2>
-        <p class="mt-1.5 text-sm text-fg-muted">Клиент Discord — войди аккаунтом Discord.</p>
+        <p class="mt-1.5 text-sm text-fg-muted">Твой аккаунт Discord — ник или почта + пароль.</p>
 
-        <button
-          type="button"
-          disabled
-          class="mt-7 flex h-10 w-full items-center justify-center gap-2.5 rounded-xl bg-[#5865f2] text-sm font-medium text-white transition hover:bg-[#4752c4] disabled:cursor-not-allowed disabled:opacity-55"
-          title="Появится после подключения API"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
-          </svg>
-          Продолжить через Discord
-        </button>
+        <form class="mt-7 space-y-4 text-left" onsubmit={submitDiscord}>
+          <Field name="discord-id" label="Логин или email" placeholder="you@example.com" autocomplete="username" bind:value={identifier} />
+          <Field name="discord-pass" label="Пароль" type="password" autocomplete="current-password" bind:value={password} />
+
+          {#if formError}
+            <p class="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-center text-[13px] leading-snug text-danger">
+              {formError}
+            </p>
+          {/if}
+
+          <Button type="submit">Войти</Button>
+        </form>
 
         <p class="mt-5 text-[13px] leading-relaxed text-fg-muted">
-          Серверы, друзья и каналы из твоего Discord-аккаунта — в одном клиенте.
+          Серверы, друзья и каналы из Discord — в одном клиенте.
         </p>
+      {:else if waicordStep === "connect"}
+        <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
+        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Подключиться к серверу</h2>
+        <p class="mt-1.5 text-sm text-fg-muted">Свой open-source сервер или публичный.</p>
 
-        <button
-          type="button"
-          onclick={() => switchMode("waicord")}
-          class="mt-4 text-[13px] font-medium text-accent transition hover:text-accent-strong"
-        >
-          Хочешь свой сервер? Переключись на waicord
-        </button>
-      {:else if view === "register"}
+        <form class="mt-7 space-y-4 text-left" onsubmit={connect}>
+          <Field
+            name="server"
+            label="Сервер"
+            placeholder="ip:порт или server.example.com"
+            autocomplete="off"
+            bind:value={serverInput}
+            error={serverError}
+          />
+          <Field
+            name="token"
+            label="Токен (если есть)"
+            placeholder="опционально"
+            autocomplete="off"
+            bind:value={tokenInput}
+          />
+
+          <Button type="submit" loading={connecting}>Войти</Button>
+        </form>
+
+        <p class="mt-6 text-center text-[13px] text-fg-muted">
+          Нет аккаунта?
+          <button
+            type="button"
+            onclick={() => {
+              if (!pendingServer) pendingServer = normalizeServer(serverInput);
+              waicordStep = "account";
+              accountView = "register";
+            }}
+            class="ml-1 font-medium text-accent transition hover:text-accent-strong"
+          >
+            Создать аккаунт
+          </button>
+        </p>
+      {:else if accountView === "register"}
         <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
         <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Create your account</h2>
-        <p class="mt-1.5 text-sm text-fg-muted">Присоединяйся к открытой сети.</p>
+        <p class="mt-1.5 text-sm text-fg-muted">{pendingServer}</p>
 
         <form class="mt-7 space-y-4 text-left" onsubmit={submitRegister}>
           <Field name="username" label="Логин" placeholder="cool_user" autocomplete="username" bind:value={regUsername} />
@@ -156,7 +270,7 @@
             </p>
           {/if}
 
-          <Button type="submit">Создать аккаунт</Button>
+          <Button type="submit" loading={loading}>Создать аккаунт</Button>
         </form>
 
         <p class="mt-6 text-center text-[13px] text-fg-muted">
@@ -164,7 +278,7 @@
           <button
             type="button"
             onclick={() => {
-              view = "login";
+              accountView = "login";
               regError = "";
             }}
             class="ml-1 font-medium text-accent transition hover:text-accent-strong"
@@ -174,10 +288,10 @@
         </p>
       {:else}
         <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
-        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Sign in to waicord</h2>
-        <p class="mt-1.5 text-sm text-fg-muted">Welcome back.</p>
+        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Вход в аккаунт</h2>
+        <p class="mt-1.5 text-sm text-fg-muted">{pendingServer}</p>
 
-        <form class="mt-7 space-y-4 text-left" onsubmit={submit}>
+        <form class="mt-7 space-y-4 text-left" onsubmit={submitAccount}>
           <Field
             name="identifier"
             label="Логин или email"
@@ -194,21 +308,6 @@
             bind:value={password}
             error={passwordError}
           />
-
-          <div class="flex items-center justify-between text-[13px]">
-            <label class="flex cursor-pointer select-none items-center gap-2 text-fg-muted">
-              <input type="checkbox" class="size-4 rounded" style="accent-color: var(--color-accent)" />
-              Запомнить меня
-            </label>
-            <button
-              type="button"
-              disabled
-              class="text-fg-muted/70 transition hover:text-fg-muted disabled:cursor-not-allowed"
-              title="Появится после подключения API"
-            >
-              Забыли пароль?
-            </button>
-          </div>
 
           {#if formError}
             <p class="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-center text-[13px] leading-snug text-danger">
@@ -240,28 +339,27 @@
           Войти через Google
         </button>
 
-        <div class="my-4 flex items-center gap-3 text-xs text-fg-muted">
-          <span class="h-px flex-1 bg-line"></span>
-          <span>или свой сервер</span>
-          <span class="h-px flex-1 bg-line"></span>
-        </div>
-
-        <div class="space-y-4 text-left">
-          <Field name="server" label="Адрес сервера" placeholder="ip:порт или server.example.com" bind:value={server} />
-          <Button variant="outline" disabled title="Появится после подключения API">Подключиться</Button>
-        </div>
-
         <p class="mt-6 text-center text-[13px] text-fg-muted">
-          Нет аккаунта?
           <button
             type="button"
             onclick={() => {
-              view = "register";
+              waicordStep = "connect";
               formError = "";
             }}
-            class="ml-1 font-medium text-accent transition hover:text-accent-strong"
+            class="font-medium text-accent transition hover:text-accent-strong"
           >
-            Создать аккаунт
+            Сменить сервер
+          </button>
+          <span class="mx-2 text-fg-muted/40">·</span>
+          <button
+            type="button"
+            onclick={() => {
+              accountView = "register";
+              formError = "";
+            }}
+            class="font-medium text-accent transition hover:text-accent-strong"
+          >
+            Создать аккаунт почтой
           </button>
         </p>
       {/if}
