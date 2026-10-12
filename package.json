@@ -2,7 +2,7 @@
   "name": "waicord",
   "version": "0.1.0",
   "private": true,
-  "description": "Discord bot with modern web dashboard",
+  "description": "Discord-like chat client with custom UI",
   "scripts": {
     "dev": "pnpm --parallel --filter './apps/*' dev",
     "lint": "pnpm --parallel --filter './apps/*' lint",

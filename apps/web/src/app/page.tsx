@@ -1,8 +1,15 @@
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h1 className="text-4xl font-bold">Waicord Dashboard</h1>
-      <p className="mt-4 text-lg">UI в разработке</p>
-    </main>
+    <div style={{ display: "flex", height: "100vh", background: "#2b2d31", color: "#fff" }}>
+      <aside style={{ width: 240, background: "#1e1f22", padding: 16 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Waicord</h1>
+        <nav style={{ marginTop: 24 }}>
+          <p style={{ color: "#b5b5b5" }}># general</p>
+        </nav>
+      </aside>
+      <main style={{ flex: 1, padding: 16 }}>
+        <p style={{ color: "#949494" }}>Чат в разработке</p>
+      </main>
+    </div>
   );
 }
