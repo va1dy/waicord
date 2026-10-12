@@ -59,9 +59,9 @@
 
         float n = fbm(p * 3.0 + vec2(t, -t * 0.7));
 
-        float core = exp(-d * d * 10.0);
-        float halo = exp(-d * 3.0) * 0.1;
-        float v = (core * 0.45 + halo) * (0.75 + 0.5 * n);
+        float core = exp(-d * d * 12.0);
+        float halo = exp(-d * 3.2) * 0.07;
+        float v = (core * 0.28 + halo) * (0.75 + 0.5 * n);
 
         vec3 ink = vec3(0.039, 0.051, 0.071);
         vec3 ember = vec3(1.0, 0.604, 0.239);
@@ -69,7 +69,7 @@
 
         vec3 col = ink;
         col = mix(col, ember, clamp(v, 0.0, 1.0));
-        col = mix(col, amber, clamp(v * v * 2.0, 0.0, 1.0));
+        col = mix(col, amber, clamp(v * v * 1.5, 0.0, 1.0));
 
         float vig = smoothstep(1.35, 0.35, length(uv - vec2(0.5)) * 1.7);
         col *= mix(0.85, 1.0, vig);
