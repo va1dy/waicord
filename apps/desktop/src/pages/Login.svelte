@@ -4,12 +4,39 @@
   import GlowCanvas from "../components/GlowCanvas.svelte";
   import { login } from "../lib/api";
 
+  type Mode = "waicord" | "discord";
+
+  let mode = $state<Mode>(
+    typeof localStorage !== "undefined" && localStorage.getItem("waicord.mode") === "discord" ? "discord" : "waicord",
+  );
+  let view = $state<"login" | "register">("login");
+
   let identifier = $state("");
   let password = $state("");
   let identifierError = $state("");
   let passwordError = $state("");
   let formError = $state("");
   let loading = $state(false);
+
+  let regUsername = $state("");
+  let regEmail = $state("");
+  let regPassword = $state("");
+  let regError = $state("");
+
+  let server = $state("");
+
+  function switchMode(next: Mode) {
+    if (mode === next) return;
+    mode = next;
+    view = "login";
+    formError = "";
+    regError = "";
+    try {
+      localStorage.setItem("waicord.mode", next);
+    } catch {
+      /* noop */
+    }
+  }
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -31,6 +58,11 @@
       loading = false;
     }
   }
+
+  function submitRegister(event: SubmitEvent) {
+    event.preventDefault();
+    regError = "Регистрация появится после подключения API";
+  }
 </script>
 
 <div class="relative h-full min-h-0 overflow-y-auto">
@@ -46,93 +78,193 @@
       class="rise w-full max-w-[376px] rounded-2xl border border-line/60 bg-panel/40 p-8 text-center shadow-[0_30px_70px_-40px_rgb(0_0_0_0.9)] backdrop-blur-xl"
       style="animation-delay: 100ms"
     >
-    <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
-    <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Sign in to waicord</h2>
-    <p class="mt-1.5 text-sm text-fg-muted">Welcome back.</p>
-
-    <form class="mt-7 space-y-4 text-left" onsubmit={submit}>
-      <Field
-        name="identifier"
-        label="Логин или email"
-        placeholder="you@example.com"
-        autocomplete="username"
-        bind:value={identifier}
-        error={identifierError}
-      />
-      <Field
-        name="password"
-        label="Пароль"
-        type="password"
-        autocomplete="current-password"
-        bind:value={password}
-        error={passwordError}
-      />
-
-      <div class="flex items-center justify-between text-[13px]">
-        <label class="flex cursor-pointer select-none items-center gap-2 text-fg-muted">
-          <input type="checkbox" class="size-4 rounded" style="accent-color: var(--color-accent)" />
-          Запомнить меня
-        </label>
+      <div class="mx-auto mb-7 flex w-full rounded-xl border border-line/60 bg-panel-soft/50 p-1 text-[13px] font-medium">
         <button
           type="button"
-          disabled
-          class="text-fg-muted/70 transition hover:text-fg-muted disabled:cursor-not-allowed"
-          title="Появится после подключения API"
+          onclick={() => switchMode("waicord")}
+          class="flex h-8 flex-1 items-center justify-center gap-2 rounded-lg transition {mode === 'waicord'
+            ? 'bg-panel text-fg shadow-sm'
+            : 'text-fg-muted hover:text-fg'}"
         >
-          Забыли пароль?
+          <img src="/waicord-mark.svg" class="size-4" alt="" aria-hidden="true" />
+          waicord
+        </button>
+        <button
+          type="button"
+          onclick={() => switchMode("discord")}
+          class="flex h-8 flex-1 items-center justify-center gap-2 rounded-lg transition {mode === 'discord'
+            ? 'bg-panel text-fg shadow-sm'
+            : 'text-fg-muted hover:text-fg'}"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class={mode === "discord" ? "text-[#5865f2]" : "text-fg-muted/70"}
+            aria-hidden="true"
+          >
+            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+          </svg>
+          discord
         </button>
       </div>
 
-      {#if formError}
-        <p class="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-center text-[13px] leading-snug text-danger">
-          {formError}
+      {#if mode === "discord"}
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="#5865f2" class="mx-auto" aria-hidden="true">
+          <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+        </svg>
+        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Вход в Discord</h2>
+        <p class="mt-1.5 text-sm text-fg-muted">Клиент Discord — войди аккаунтом Discord.</p>
+
+        <button
+          type="button"
+          disabled
+          class="mt-7 flex h-10 w-full items-center justify-center gap-2.5 rounded-xl bg-[#5865f2] text-sm font-medium text-white transition hover:bg-[#4752c4] disabled:cursor-not-allowed disabled:opacity-55"
+          title="Появится после подключения API"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+          </svg>
+          Продолжить через Discord
+        </button>
+
+        <p class="mt-5 text-[13px] leading-relaxed text-fg-muted">
+          Серверы, друзья и каналы из твоего Discord-аккаунта — в одном клиенте.
+        </p>
+
+        <button
+          type="button"
+          onclick={() => switchMode("waicord")}
+          class="mt-4 text-[13px] font-medium text-accent transition hover:text-accent-strong"
+        >
+          Хочешь свой сервер? Переключись на waicord
+        </button>
+      {:else if view === "register"}
+        <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
+        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Create your account</h2>
+        <p class="mt-1.5 text-sm text-fg-muted">Присоединяйся к открытой сети.</p>
+
+        <form class="mt-7 space-y-4 text-left" onsubmit={submitRegister}>
+          <Field name="username" label="Логин" placeholder="cool_user" autocomplete="username" bind:value={regUsername} />
+          <Field name="email" label="Email" type="email" placeholder="you@example.com" autocomplete="email" bind:value={regEmail} />
+          <Field name="reg-password" label="Пароль" type="password" autocomplete="new-password" bind:value={regPassword} />
+
+          {#if regError}
+            <p class="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-center text-[13px] leading-snug text-danger">
+              {regError}
+            </p>
+          {/if}
+
+          <Button type="submit">Создать аккаунт</Button>
+        </form>
+
+        <p class="mt-6 text-center text-[13px] text-fg-muted">
+          Уже есть аккаунт?
+          <button
+            type="button"
+            onclick={() => {
+              view = "login";
+              regError = "";
+            }}
+            class="ml-1 font-medium text-accent transition hover:text-accent-strong"
+          >
+            Войти
+          </button>
+        </p>
+      {:else}
+        <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
+        <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Sign in to waicord</h2>
+        <p class="mt-1.5 text-sm text-fg-muted">Welcome back.</p>
+
+        <form class="mt-7 space-y-4 text-left" onsubmit={submit}>
+          <Field
+            name="identifier"
+            label="Логин или email"
+            placeholder="you@example.com"
+            autocomplete="username"
+            bind:value={identifier}
+            error={identifierError}
+          />
+          <Field
+            name="password"
+            label="Пароль"
+            type="password"
+            autocomplete="current-password"
+            bind:value={password}
+            error={passwordError}
+          />
+
+          <div class="flex items-center justify-between text-[13px]">
+            <label class="flex cursor-pointer select-none items-center gap-2 text-fg-muted">
+              <input type="checkbox" class="size-4 rounded" style="accent-color: var(--color-accent)" />
+              Запомнить меня
+            </label>
+            <button
+              type="button"
+              disabled
+              class="text-fg-muted/70 transition hover:text-fg-muted disabled:cursor-not-allowed"
+              title="Появится после подключения API"
+            >
+              Забыли пароль?
+            </button>
+          </div>
+
+          {#if formError}
+            <p class="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-center text-[13px] leading-snug text-danger">
+              {formError}
+            </p>
+          {/if}
+
+          <Button type="submit" loading={loading}>Войти</Button>
+        </form>
+
+        <div class="my-4 flex items-center gap-3 text-xs text-fg-muted">
+          <span class="h-px flex-1 bg-line"></span>
+          <span>или</span>
+          <span class="h-px flex-1 bg-line"></span>
+        </div>
+
+        <button
+          type="button"
+          disabled
+          class="flex h-9 w-full items-center justify-center gap-2.5 rounded-xl bg-white text-[13px] font-medium text-[#1f1f1f] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+          title="Появится после подключения API"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+          </svg>
+          Войти через Google
+        </button>
+
+        <div class="my-4 flex items-center gap-3 text-xs text-fg-muted">
+          <span class="h-px flex-1 bg-line"></span>
+          <span>или свой сервер</span>
+          <span class="h-px flex-1 bg-line"></span>
+        </div>
+
+        <div class="space-y-4 text-left">
+          <Field name="server" label="Адрес сервера" placeholder="ip:порт или server.example.com" bind:value={server} />
+          <Button variant="outline" disabled title="Появится после подключения API">Подключиться</Button>
+        </div>
+
+        <p class="mt-6 text-center text-[13px] text-fg-muted">
+          Нет аккаунта?
+          <button
+            type="button"
+            onclick={() => {
+              view = "register";
+              formError = "";
+            }}
+            class="ml-1 font-medium text-accent transition hover:text-accent-strong"
+          >
+            Создать аккаунт
+          </button>
         </p>
       {/if}
-
-      <Button type="submit" loading={loading}>Войти</Button>
-    </form>
-
-    <div class="my-5 flex items-center gap-3 text-xs text-fg-muted">
-      <span class="h-px flex-1 bg-line"></span>
-      <span>или</span>
-      <span class="h-px flex-1 bg-line"></span>
-    </div>
-
-    <Button variant="outline" disabled title="Появится после подключения API">
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <path d="M14 14h3v3h-3z" />
-        <path d="M20 14h1v1h-1z" />
-        <path d="M14 20h1v1h-1z" />
-        <path d="M18 18h3v3h-3z" />
-      </svg>
-      Войти по QR-коду
-      <span class="ml-1 rounded-full bg-line px-2 py-0.5 text-[10px] font-medium text-fg-muted">скоро</span>
-    </Button>
-
-    <p class="mt-6 text-center text-[13px] text-fg-muted">
-      Нет аккаунта?
-      <button
-        type="button"
-        disabled
-        class="ml-1 font-medium text-accent disabled:cursor-not-allowed disabled:text-fg-muted"
-        title="Появится после подключения API"
-      >
-        Создать аккаунт
-      </button>
-    </p>
     </div>
   </div>
 </div>
