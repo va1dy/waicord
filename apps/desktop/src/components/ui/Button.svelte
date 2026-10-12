@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  type Variant = "primary" | "soft" | "ghost";
+  type Variant = "primary" | "soft" | "outline" | "ghost";
 
   let {
     type = "button",
@@ -24,12 +24,13 @@
   } = $props();
 
   const base =
-    "relative flex h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-[14px] font-medium transition outline-none disabled:pointer-events-none disabled:opacity-50 active:translate-y-px";
+    "relative flex h-9 w-full items-center justify-center gap-2 rounded-xl px-4 text-[14px] font-medium transition outline-none disabled:pointer-events-none disabled:opacity-50 active:translate-y-px";
 
   const variants: Record<Variant, string> = {
     primary:
       "bg-accent text-ink font-semibold hover:bg-accent-strong shadow-[0_10px_26px_-16px_rgba(255,180,84,0.7)]",
     soft: "border border-line bg-panel-soft text-fg hover:border-accent/40 hover:bg-panel",
+    outline: "border border-line bg-transparent text-fg hover:border-accent/50 hover:bg-panel-soft/60",
     ghost: "text-fg-muted hover:text-fg",
   };
 </script>
