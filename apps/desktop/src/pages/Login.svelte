@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import Button from "../components/ui/Button.svelte";
   import Field from "../components/ui/Field.svelte";
+  import GlowCanvas from "../components/GlowCanvas.svelte";
   import { login } from "../lib/api";
 
   let identifier = $state("");
@@ -31,73 +31,13 @@
       loading = false;
     }
   }
-
-  onMount(() => {
-    const bg = document.getElementById("bg");
-    const glow1 = document.getElementById("glow-1");
-    const glow2 = document.getElementById("glow-2");
-    if (!bg || !glow1 || !glow2) return;
-
-    let tx = window.innerWidth / 2;
-    let ty = window.innerHeight / 2;
-    let x = tx;
-    let y = ty;
-    let x2 = tx;
-    let y2 = ty;
-
-    const paint = () => {
-      glow1.style.transform = `translate3d(${x - 210}px, ${y - 210}px, 0)`;
-      glow2.style.transform = `translate3d(${x2 - 280}px, ${y2 - 280}px, 0)`;
-      bg.style.setProperty("--mx", `${x}px`);
-      bg.style.setProperty("--my", `${y}px`);
-    };
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      paint();
-      return;
-    }
-
-    const onMove = (event: PointerEvent) => {
-      tx = event.clientX;
-      ty = event.clientY;
-    };
-    window.addEventListener("pointermove", onMove, { passive: true });
-
-    let raf = 0;
-    const tick = () => {
-      x += (tx - x) * 0.09;
-      y += (ty - y) * 0.09;
-      x2 += (tx - x2) * 0.035;
-      y2 += (ty - y2) * 0.035;
-      paint();
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      cancelAnimationFrame(raf);
-    };
-  });
 </script>
 
 <div class="relative h-full min-h-0 overflow-y-auto">
-  <div id="bg" class="pointer-events-none fixed inset-0" style="--mx: 50vw; --my: 50vh">
+  <div id="bg" class="pointer-events-none fixed inset-0">
+    <GlowCanvas />
     <div
       class="absolute inset-0 [background-image:linear-gradient(rgba(232,236,244,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(232,236,244,0.04)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(130%_110%_at_50%_35%,black_10%,transparent_75%)]"
-    ></div>
-    <div
-      class="absolute inset-0 [background-image:linear-gradient(rgba(232,236,244,0.13)_1px,transparent_1px),linear-gradient(90deg,rgba(232,236,244,0.13)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(240px_at_var(--mx)_var(--my),black,transparent_75%)]"
-    ></div>
-    <div
-      id="glow-1"
-      class="absolute top-0 left-0 size-[420px] rounded-full bg-accent/15 blur-[120px]"
-      style="transform: translate3d(calc(50vw - 210px), calc(50vh - 210px), 0)"
-    ></div>
-    <div
-      id="glow-2"
-      class="absolute top-0 left-0 size-[560px] rounded-full bg-accent-deep/10 blur-[160px]"
-      style="transform: translate3d(calc(50vw - 280px), calc(50vh - 280px), 0)"
     ></div>
   </div>
 
