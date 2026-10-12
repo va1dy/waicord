@@ -1,9 +1,12 @@
 import { Database } from "bun:sqlite";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { extname, join } from "node:path";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DB_PATH = process.env.DB_PATH ?? join(import.meta.dir, "data.db");
+const UPLOAD_DIR = process.env.UPLOAD_DIR ?? join(import.meta.dir, "data", "uploads");
+mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const db = new Database(DB_PATH, { create: true });
 db.run("PRAGMA journal_mode = WAL");
@@ -79,6 +82,29 @@ db.run(`
 `);
 db.run(`CREATE INDEX IF NOT EXISTS idx_dm_messages_conv ON dm_messages(conversation_id, created_at)`);
 
+function ensureColumn(table: string, column: string, ddl: string) {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+}
+ensureColumn("users", "display_name", "TEXT");
+ensureColumn("users", "status", "TEXT");
+ensureColumn("users", "bio", "TEXT");
+ensureColumn("users", "avatar_url", "TEXT");
+ensureColumn("messages", "attachments", "TEXT");
+ensureColumn("dm_messages", "attachments", "TEXT");
+db.run(`
+  CREATE TABLE IF NOT EXISTS uploads (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    mime TEXT,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )
+`);
+
 const general = db.query(`SELECT id FROM channels WHERE name = 'general'`).get() as { id: string } | null;
 if (!general) {
   db.run(`INSERT INTO channels (id, name, created_at) VALUES (?, 'general', ?)`, [uid(), Date.now()]);
@@ -108,15 +134,38 @@ interface UserRow {
   email: string;
   password_hash: string;
   created_at: number;
+  display_name: string | null;
+  status: string | null;
+  bio: string | null;
+  avatar_url: string | null;
 }
 
 function publicUser(u: UserRow) {
-  return { id: u.id, username: u.username, email: u.email, created_at: u.created_at };
+  return {
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    created_at: u.created_at,
+    display_name: u.display_name,
+    status: u.status,
+    bio: u.bio,
+    avatar_url: u.avatar_url,
+  };
+}
+
+function userBrief(u: UserRow) {
+  return {
+    id: u.id,
+    username: u.username,
+    display_name: u.display_name,
+    avatar_url: u.avatar_url,
+    status: u.status,
+  };
 }
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
@@ -184,7 +233,20 @@ interface MessageRow {
   user_id: string;
   content: string;
   created_at: number;
+  attachments: string | null;
   username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
+function parseAttachments(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string").slice(0, 8) : [];
+  } catch {
+    return [];
+  }
 }
 
 function messageView(m: MessageRow) {
@@ -193,7 +255,8 @@ function messageView(m: MessageRow) {
     channel_id: m.channel_id,
     content: m.content,
     created_at: m.created_at,
-    user: { id: m.user_id, username: m.username },
+    attachments: parseAttachments(m.attachments),
+    user: { id: m.user_id, username: m.username, display_name: m.display_name, avatar_url: m.avatar_url },
   };
 }
 
@@ -203,7 +266,10 @@ interface DmMessageRow {
   user_id: string;
   content: string;
   created_at: number;
+  attachments: string | null;
   username: string;
+  display_name: string | null;
+  avatar_url: string | null;
 }
 
 function dmMessageView(m: DmMessageRow) {
@@ -212,7 +278,8 @@ function dmMessageView(m: DmMessageRow) {
     conversation_id: m.conversation_id,
     content: m.content,
     created_at: m.created_at,
-    user: { id: m.user_id, username: m.username },
+    attachments: parseAttachments(m.attachments),
+    user: { id: m.user_id, username: m.username, display_name: m.display_name, avatar_url: m.avatar_url },
   };
 }
 
@@ -223,13 +290,21 @@ function isMember(conversationId: string, userId: string): boolean {
   return !!row;
 }
 
-function conversationMembers(conversationId: string): { id: string; username: string }[] {
-  return db
-    .query(
-      `SELECT u.id, u.username FROM conversation_members m JOIN users u ON u.id = m.user_id
-       WHERE m.conversation_id = ? ORDER BY u.username`
-    )
-    .all(conversationId) as { id: string; username: string }[];
+function conversationMembers(conversationId: string) {
+  return (
+    db
+      .query(
+        `SELECT u.id, u.username, u.display_name, u.avatar_url, u.status FROM conversation_members m JOIN users u ON u.id = m.user_id
+         WHERE m.conversation_id = ? ORDER BY u.username`
+      )
+      .all(conversationId) as {
+      id: string;
+      username: string;
+      display_name: string | null;
+      avatar_url: string | null;
+      status: string | null;
+    }[]
+  ).map((m) => ({ ...m, online: isOnline(m.id) }));
 }
 
 let server: ReturnType<typeof Bun.serve>;
@@ -312,6 +387,93 @@ server = Bun.serve({
       return json({ user: publicUser(user) });
     }
 
+    if (pathname === "/api/me" && req.method === "PATCH") {
+      const user = authUser(req);
+      if (!user) return json({ error: "Не авторизован" }, 401);
+      const body = (await req.json().catch(() => null)) as {
+        display_name?: string;
+        status?: string;
+        bio?: string;
+        avatar_url?: string;
+      } | null;
+      if (!body) return json({ error: "Пустой запрос" }, 400);
+
+      const display = body.display_name !== undefined ? body.display_name.trim().slice(0, 32) : user.display_name;
+      const status = body.status !== undefined ? body.status.trim().slice(0, 64) : user.status;
+      const bio = body.bio !== undefined ? body.bio.trim().slice(0, 190) : user.bio;
+      let avatar = user.avatar_url;
+      if (body.avatar_url !== undefined) {
+        const a = body.avatar_url;
+        if (a === null || a === "") avatar = null;
+        else if (a.startsWith("data:image/") && a.length <= 300_000) avatar = a;
+        else return json({ error: "Аватар: data-url изображения до 300КБ" }, 400);
+      }
+
+      db.run(`UPDATE users SET display_name = ?, status = ?, bio = ?, avatar_url = ? WHERE id = ?`, [
+        display || null,
+        status || null,
+        bio || null,
+        avatar,
+        user.id,
+      ]);
+      const updated = db.query(`SELECT * FROM users WHERE id = ?`).get(user.id) as UserRow;
+      publishToUser(user.id, { type: "profile_updated", user: publicUser(updated) });
+      return json({ user: publicUser(updated) });
+    }
+
+    if (pathname === "/api/upload" && req.method === "POST") {
+      const user = authUser(req);
+      if (!user) return json({ error: "Не авторизован" }, 401);
+      const body = (await req.json().catch(() => null)) as { name?: string; data?: string } | null;
+      const name = (body?.name ?? "file").replace(/[^\w.а-яё -]/gi, "_").slice(0, 100);
+      const data = body?.data ?? "";
+      if (!data) return json({ error: "Пустой файл" }, 400);
+      const buffer = Buffer.from(data, "base64");
+      if (buffer.length > 10 * 1024 * 1024) return json({ error: "Файл больше 10 МБ" }, 400);
+      const id = uid();
+      const ext = (extname(name) || "").toLowerCase().slice(0, 10);
+      const stored = `${id}${ext}`;
+      writeFileSync(join(UPLOAD_DIR, stored), buffer);
+      db.run(`INSERT INTO uploads (id, user_id, name, mime, size, created_at) VALUES (?, ?, ?, ?, ?, ?)`, [
+        id,
+        user.id,
+        name,
+        "",
+        buffer.length,
+        Date.now(),
+      ]);
+      return json({ url: `/uploads/${stored}`, name, size: buffer.length }, 201);
+    }
+
+    const uploadFile = pathname.match(/^\/uploads\/([a-zA-Z0-9._-]+)$/);
+    if (uploadFile && req.method === "GET") {
+      const stored = uploadFile[1];
+      if (stored.includes("..")) return json({ error: "Плохой путь" }, 400);
+      const path = join(UPLOAD_DIR, stored);
+      if (!existsSync(path)) return json({ error: "Файл не найден" }, 404);
+      const bytes = readFileSync(path);
+      const ext = extname(stored).toLowerCase();
+      const mime =
+        ext === ".png"
+          ? "image/png"
+          : ext === ".gif"
+            ? "image/gif"
+            : ext === ".webp"
+              ? "image/webp"
+              : ext === ".jpg" || ext === ".jpeg"
+                ? "image/jpeg"
+                : ext === ".mp4"
+                  ? "video/mp4"
+                  : "application/octet-stream";
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": mime,
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
+    }
+
     if (pathname === "/api/channels" && req.method === "GET") {
       const user = authUser(req);
       if (!user) return json({ error: "Не авторизован" }, 401);
@@ -333,6 +495,7 @@ server = Bun.serve({
         channel.name,
         channel.created_at,
       ]);
+      server.publish("chat", JSON.stringify({ type: "channel_create", channel }));
       return json({ channel }, 201);
     }
 
@@ -344,7 +507,7 @@ server = Bun.serve({
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
       const messages = db
         .query(
-          `SELECT m.*, u.username FROM messages m JOIN users u ON u.id = m.user_id
+          `SELECT m.*, u.username, u.display_name, u.avatar_url FROM messages m JOIN users u ON u.id = m.user_id
            WHERE m.channel_id = ? ORDER BY m.created_at DESC LIMIT ?`
         )
         .all(channelId, limit) as MessageRow[];
@@ -359,9 +522,10 @@ server = Bun.serve({
         | { id: string }
         | undefined;
       if (!channel) return json({ error: "Канал не найден" }, 404);
-      const body = (await req.json().catch(() => null)) as { content?: string } | null;
+      const body = (await req.json().catch(() => null)) as { content?: string; attachments?: string[] } | null;
       const content = body?.content?.trim() ?? "";
-      if (!content) return json({ error: "Пустое сообщение" }, 400);
+      const attachments = (body?.attachments ?? []).filter((a) => typeof a === "string").slice(0, 8);
+      if (!content && attachments.length === 0) return json({ error: "Пустое сообщение" }, 400);
       if (content.length > 2000) return json({ error: "Максимум 2000 символов" }, 400);
 
       const message: MessageRow = {
@@ -370,11 +534,14 @@ server = Bun.serve({
         user_id: user.id,
         content,
         created_at: Date.now(),
+        attachments: JSON.stringify(attachments),
         username: user.username,
+        display_name: user.display_name,
+        avatar_url: user.avatar_url,
       };
       db.run(
-        `INSERT INTO messages (id, channel_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-        [message.id, message.channel_id, message.user_id, message.content, message.created_at]
+        `INSERT INTO messages (id, channel_id, user_id, content, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?)`,
+        [message.id, message.channel_id, message.user_id, message.content, message.created_at, message.attachments]
       );
       server.publish("chat", JSON.stringify({ type: "message", message: messageView(message) }));
       return json({ message: messageView(message) }, 201);
@@ -386,7 +553,7 @@ server = Bun.serve({
 
       const friendRows = db
         .query(
-          `SELECT f.id AS request_id, u.id, u.username,
+          `SELECT f.id AS request_id, u.id, u.username, u.display_name, u.avatar_url,
                   CASE WHEN f.requester_id = ? THEN 'outgoing' ELSE 'incoming' END AS direction
            FROM friends f
            JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
@@ -396,17 +563,25 @@ server = Bun.serve({
         request_id: string;
         id: string;
         username: string;
+        display_name: string | null;
+        avatar_url: string | null;
         direction: string;
       }[];
 
       const accepted = db
         .query(
-          `SELECT u.id, u.username FROM friends f
+          `SELECT u.id, u.username, u.display_name, u.avatar_url, u.status FROM friends f
            JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
            WHERE f.status = 'accepted' AND (f.requester_id = ? OR f.addressee_id = ?)
            ORDER BY u.username`
         )
-        .all(user.id, user.id, user.id) as { id: string; username: string }[];
+        .all(user.id, user.id, user.id) as {
+        id: string;
+        username: string;
+        display_name: string | null;
+        avatar_url: string | null;
+        status: string | null;
+      }[];
 
       return json({
         friends: accepted.map((f) => ({ ...f, online: isOnline(f.id) })),
@@ -439,7 +614,7 @@ server = Bun.serve({
         if (existing.status === "accepted") return json({ error: "Вы уже друзья" }, 409);
         if (existing.requester_id === user.id) return json({ error: "Заявка уже отправлена" }, 409);
         db.run(`UPDATE friends SET status = 'accepted' WHERE id = ?`, [existing.id]);
-        publishToUser(target.id, { type: "friend_accept", from: { id: user.id, username: user.username } });
+        publishToUser(target.id, { type: "friend_accept", from: userBrief(user) });
         return json({ ok: true, accepted: true });
       }
 
@@ -448,7 +623,7 @@ server = Bun.serve({
         `INSERT INTO friends (id, requester_id, addressee_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)`,
         [id, user.id, target.id, Date.now()]
       );
-      publishToUser(target.id, { type: "friend_request", from: { id: user.id, username: user.username } });
+      publishToUser(target.id, { type: "friend_request", from: userBrief(user) });
       return json({ ok: true, request_id: id }, 201);
     }
 
@@ -462,7 +637,7 @@ server = Bun.serve({
       if (!row || row.addressee_id !== user.id) return json({ error: "Заявка не найдена" }, 404);
       if (row.status !== "pending") return json({ error: "Заявка уже обработана" }, 409);
       db.run(`UPDATE friends SET status = 'accepted' WHERE id = ?`, [row.id]);
-      publishToUser(row.requester_id, { type: "friend_accept", from: { id: user.id, username: user.username } });
+      publishToUser(row.requester_id, { type: "friend_accept", from: userBrief(user) });
       return json({ ok: true });
     }
 
@@ -488,7 +663,7 @@ server = Bun.serve({
          ((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?))`,
         [user.id, friendRemove[1], friendRemove[1], user.id]
       );
-      publishToUser(friendRemove[1], { type: "friend_remove", from: { id: user.id, username: user.username } });
+      publishToUser(friendRemove[1], { type: "friend_remove", from: userBrief(user) });
       return json({ ok: true });
     }
 
@@ -599,7 +774,7 @@ server = Bun.serve({
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
       const rows = db
         .query(
-          `SELECT d.*, u.username FROM dm_messages d JOIN users u ON u.id = d.user_id
+          `SELECT d.*, u.username, u.display_name, u.avatar_url FROM dm_messages d JOIN users u ON u.id = d.user_id
            WHERE d.conversation_id = ? ORDER BY d.created_at DESC LIMIT ?`
         )
         .all(dmMessages[1], limit) as DmMessageRow[];
@@ -611,9 +786,10 @@ server = Bun.serve({
       if (!user) return json({ error: "Не авторизован" }, 401);
       const conversationId = dmMessages[1];
       if (!isMember(conversationId, user.id)) return json({ error: "Нет доступа" }, 403);
-      const body = (await req.json().catch(() => null)) as { content?: string } | null;
+      const body = (await req.json().catch(() => null)) as { content?: string; attachments?: string[] } | null;
       const content = body?.content?.trim() ?? "";
-      if (!content) return json({ error: "Пустое сообщение" }, 400);
+      const attachments = (body?.attachments ?? []).filter((a) => typeof a === "string").slice(0, 8);
+      if (!content && attachments.length === 0) return json({ error: "Пустое сообщение" }, 400);
       if (content.length > 2000) return json({ error: "Максимум 2000 символов" }, 400);
 
       const message: DmMessageRow = {
@@ -622,11 +798,14 @@ server = Bun.serve({
         user_id: user.id,
         content,
         created_at: Date.now(),
+        attachments: JSON.stringify(attachments),
         username: user.username,
+        display_name: user.display_name,
+        avatar_url: user.avatar_url,
       };
       db.run(
-        `INSERT INTO dm_messages (id, conversation_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-        [message.id, message.conversation_id, message.user_id, message.content, message.created_at]
+        `INSERT INTO dm_messages (id, conversation_id, user_id, content, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?)`,
+        [message.id, message.conversation_id, message.user_id, message.content, message.created_at, message.attachments]
       );
       const view = dmMessageView(message);
       const members = conversationMembers(conversationId);
@@ -661,15 +840,45 @@ server = Bun.serve({
     message(ws, raw) {
       const userId = (ws.data as { userId?: string }).userId;
       if (!userId) return;
-      let parsed: { type?: string; channel_id?: string; conversation_id?: string; content?: string };
+      let parsed: {
+        type?: string;
+        channel_id?: string;
+        conversation_id?: string;
+        content?: string;
+        attachments?: string[];
+        to?: string;
+        payload?: unknown;
+      };
       try {
         parsed = JSON.parse(String(raw));
       } catch {
         return;
       }
-      const content = (parsed.content ?? "").trim().slice(0, 2000);
-      if (!content) return;
       const user = db.query(`SELECT * FROM users WHERE id = ?`).get(userId) as UserRow;
+
+      if (parsed.type === "signal" && parsed.to && parsed.payload && typeof parsed.payload === "object") {
+        const shared = db
+          .query(
+            `SELECT 1 FROM conversation_members a
+             JOIN conversation_members b ON a.conversation_id = b.conversation_id
+             WHERE a.user_id = ? AND b.user_id = ? LIMIT 1`
+          )
+          .get(userId, parsed.to);
+        if (!shared) return;
+        publishToUser(parsed.to, {
+          type: "signal",
+          from: user.id,
+          from_username: user.username,
+          from_display_name: user.display_name,
+          from_avatar_url: user.avatar_url,
+          payload: parsed.payload,
+        });
+        return;
+      }
+
+      const content = (parsed.content ?? "").trim().slice(0, 2000);
+      const attachments = (parsed.attachments ?? []).filter((a) => typeof a === "string").slice(0, 8);
+      if (!content && attachments.length === 0) return;
 
       if (parsed.type === "message" && parsed.channel_id) {
         const channel = db.query(`SELECT id FROM channels WHERE id = ?`).get(parsed.channel_id) as
@@ -682,11 +891,14 @@ server = Bun.serve({
           user_id: user.id,
           content,
           created_at: Date.now(),
+          attachments: JSON.stringify(attachments),
           username: user.username,
+          display_name: user.display_name,
+          avatar_url: user.avatar_url,
         };
         db.run(
-          `INSERT INTO messages (id, channel_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-          [message.id, message.channel_id, message.user_id, message.content, message.created_at]
+          `INSERT INTO messages (id, channel_id, user_id, content, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?)`,
+          [message.id, message.channel_id, message.user_id, message.content, message.created_at, message.attachments]
         );
         server.publish("chat", JSON.stringify({ type: "message", message: messageView(message) }));
         return;
@@ -700,11 +912,14 @@ server = Bun.serve({
           user_id: user.id,
           content,
           created_at: Date.now(),
+          attachments: JSON.stringify(attachments),
           username: user.username,
+          display_name: user.display_name,
+          avatar_url: user.avatar_url,
         };
         db.run(
-          `INSERT INTO dm_messages (id, conversation_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-          [message.id, message.conversation_id, message.user_id, message.content, message.created_at]
+          `INSERT INTO dm_messages (id, conversation_id, user_id, content, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?)`,
+          [message.id, message.conversation_id, message.user_id, message.content, message.created_at, message.attachments]
         );
         const view = dmMessageView(message);
         for (const member of conversationMembers(parsed.conversation_id)) {

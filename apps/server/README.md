@@ -61,10 +61,13 @@ systemctl enable --now waicord
 | POST | `/api/register` | `{username, email, password}` → `{token, user}` |
 | POST | `/api/login` | `{identifier, password}` → `{token, user}` |
 | GET | `/api/me` | профиль (Bearer) |
+| PATCH | `/api/me` | `{display_name?, status?, bio?, avatar_url?}` — обновить профиль (Bearer) |
+| POST | `/api/upload` | `{name, data(base64)}` → `{url}` — файл, ≤10 МБ (Bearer) |
+| GET | `/uploads/:file` | отдать загруженный файл |
 | GET | `/api/channels` | список каналов (Bearer) |
 | POST | `/api/channels` | `{name}` — создать канал (Bearer) |
 | GET | `/api/channels/:id/messages` | история (Bearer, `?limit=`) |
-| POST | `/api/channels/:id/messages` | `{content}` — отправить (Bearer) |
+| POST | `/api/channels/:id/messages` | `{content?, attachments?[]}` — отправить (Bearer) |
 | GET | `/api/friends` | друзья + заявки (Bearer) |
 | POST | `/api/friends/requests` | `{username}` — отправить заявку (Bearer) |
 | POST | `/api/friends/requests/:id/accept` | принять заявку (Bearer) |
@@ -73,12 +76,15 @@ systemctl enable --now waicord
 | GET | `/api/dms` | список ЛС и групп (Bearer) |
 | POST | `/api/dms` | `{usernames[], name?, kind?}` — ЛС/группа (Bearer) |
 | GET | `/api/dms/:id/messages` | история ЛС (Bearer, `?limit=`) |
-| POST | `/api/dms/:id/messages` | `{content}` — отправить в ЛС (Bearer) |
+| POST | `/api/dms/:id/messages` | `{content?, attachments?[]}` — отправить в ЛС (Bearer) |
 | WS | `/ws?token=` | live-события (см. ниже) |
 
 ### WebSocket-события
 
-Входящие (от клиента): `{type:"message", channel_id, content}` или `{type:"dm", conversation_id, content}`.
+Входящие (от клиента):
+- `{type:"message", channel_id, content?, attachments?[]}`
+- `{type:"dm", conversation_id, content?, attachments?[]}`
+- `{type:"signal", to, payload}` — сигналинг звонков WebRTC (relay, только общий диалог)
 
 Исходящие (broadcast):
 
@@ -90,6 +96,9 @@ systemctl enable --now waicord
 | `friend_accept` | `{from}` | заявка принята (отправителю) |
 | `friend_remove` | `{from}` | удаление из друзей |
 | `dm_create` | `{conversation}` | создана группа с тобой |
+| `channel_create` | `{channel}` | создан канал (всем) |
 | `presence` | `{user_id, online}` | друг вышел/зашёл (друзьям) |
+| `profile_updated` | `{user}` | профиль обновлён (тебе) |
+| `signal` | `{from, payload}` | звонок WebRTC (получателю) |
 
 Presence хранится в памяти процесса (сбрасывается при рестарте).
