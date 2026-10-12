@@ -1,8 +1,14 @@
 <script lang="ts">
+  import { getVersion } from "@tauri-apps/api/app";
   import Logo from "../components/Logo.svelte";
   import Button from "../components/ui/Button.svelte";
   import Field from "../components/ui/Field.svelte";
   import { login } from "../lib/api";
+
+  let version = $state("");
+  getVersion()
+    .then((v) => (version = v))
+    .catch(() => {});
 
   let identifier = $state("");
   let password = $state("");
@@ -33,14 +39,14 @@
   }
 </script>
 
-<div class="grid h-full min-w-0 min-[900px]:grid-cols-[1.15fr_1fr]">
-  <section class="relative hidden overflow-hidden min-[900px]:flex">
-    <div
-      class="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(232,236,244,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(232,236,244,0.045)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(120%_100%_at_15%_20%,black_10%,transparent_75%)]"
-    ></div>
-    <div class="pointer-events-none absolute -bottom-32 -left-24 size-[440px] rounded-full bg-accent/15 blur-[140px]"></div>
-    <div class="pointer-events-none absolute -top-28 right-[-60px] size-[320px] rounded-full bg-accent-deep/10 blur-[130px]"></div>
+<div class="relative grid h-full min-w-0 overflow-hidden min-[900px]:grid-cols-[1.15fr_1fr]">
+  <div
+    class="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(232,236,244,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(232,236,244,0.045)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(130%_110%_at_12%_25%,black_8%,transparent_72%)]"
+  ></div>
+  <div class="pointer-events-none absolute -bottom-32 -left-24 size-[440px] rounded-full bg-accent/15 blur-[140px]"></div>
+  <div class="pointer-events-none absolute -top-28 left-[53.5%] size-[320px] -translate-x-1/2 rounded-full bg-accent-deep/10 blur-[130px]"></div>
 
+  <section class="relative hidden min-[900px]:flex">
     <div class="relative z-10 flex w-full flex-col p-12">
       <Logo />
       <div class="mt-auto max-w-[520px] pb-2">
@@ -52,6 +58,15 @@
         </h1>
         <p class="rise mt-5 max-w-[46ch] text-[16px] leading-relaxed text-fg-muted" style="animation-delay: 160ms">
           Серверы, каналы и голос в клиенте, который открывается мгновенно и почти не ест память.
+        </p>
+        <p
+          class="rise mt-6 flex items-center gap-2 text-[12px] text-fg-muted"
+          style="animation-delay: 260ms"
+        >
+          {#if version}
+            <span class="rounded-full border border-line bg-panel-soft/70 px-2 py-0.5 font-medium">v{version}</span>
+          {/if}
+          <span>ранняя альфа · открытый исходный код</span>
         </p>
       </div>
     </div>
