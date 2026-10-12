@@ -106,7 +106,7 @@
       class="rise w-full max-w-[376px] rounded-2xl border border-line/60 bg-panel/40 p-8 text-center shadow-[0_30px_70px_-40px_rgb(0_0_0_0.9)] backdrop-blur-xl"
       style="animation-delay: 100ms"
     >
-    <img src="/waicord.svg" alt="" class="mx-auto size-14 rounded-2xl" aria-hidden="true" />
+    <img src="/waicord.svg" alt="" class="mx-auto size-14" aria-hidden="true" />
     <h2 class="mt-5 font-display text-[26px] font-semibold tracking-tight">Sign in to waicord</h2>
     <p class="mt-1.5 text-sm text-fg-muted">Welcome back.</p>
 

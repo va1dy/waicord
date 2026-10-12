@@ -52,7 +52,7 @@
 
 <header
   data-tauri-drag-region
-  class="relative z-50 flex h-9 shrink-0 items-center justify-between pr-1 pl-2.5 select-none"
+  class="relative z-50 flex h-9 shrink-0 items-center justify-between pl-2.5 select-none"
 >
   <nav class="flex items-center gap-0.5">
     <button
@@ -89,7 +89,7 @@
     <button
       type="button"
       onclick={minimize}
-      class="grid h-full w-9 place-items-center rounded-tr-md text-fg-muted transition hover:bg-white/5 hover:text-fg"
+      class="grid h-full w-9 place-items-center text-fg-muted transition hover:bg-white/5 hover:text-fg"
       title="Свернуть"
     >
       <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
@@ -116,7 +116,7 @@
     <button
       type="button"
       onclick={close}
-      class="grid h-full w-9 place-items-center rounded-tr-md text-fg-muted transition hover:bg-danger hover:text-white"
+      class="grid h-full w-9 place-items-center text-fg-muted transition hover:bg-white/5 hover:text-fg"
       title="Закрыть"
     >
       <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true">
