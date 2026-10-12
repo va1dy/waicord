@@ -2,6 +2,7 @@ import {
   acceptFriendRequest,
   channelMessages,
   clearSession,
+  createChannel,
   createDm,
   declineFriendRequest,
   dmMessages,
@@ -14,23 +15,29 @@ import {
   sendChannelMessage,
   sendDmMessage,
   sendFriendRequest,
+  updateMe,
   type Channel,
   type DmConversation,
   type FriendEntry,
   type Message,
   type Session,
+  type User,
 } from "./api";
+import { call } from "./call.svelte";
 
 export type ActiveView = { kind: "friends" } | { kind: "channel"; id: string } | { kind: "dm"; id: string };
 
 type WsEvent =
   | { type: "message"; message: Message }
   | { type: "dm"; message: Message }
-  | { type: "friend_request"; from: { id: string; username: string } }
-  | { type: "friend_accept"; from: { id: string; username: string } }
-  | { type: "friend_remove"; from: { id: string; username: string } }
+  | { type: "friend_request"; from: User }
+  | { type: "friend_accept"; from: User }
+  | { type: "friend_remove"; from: User }
   | { type: "dm_create"; conversation: DmConversation }
-  | { type: "presence"; user_id: string; online: boolean };
+  | { type: "presence"; user_id: string; online: boolean }
+  | { type: "channel_create"; channel: Channel }
+  | { type: "profile_updated"; user: User }
+  | { type: "signal"; from: string; from_username: string; from_display_name: string | null; from_avatar_url: string | null; payload: Record<string, unknown> };
 
 class AppState {
   session = $state<Session | null>(null);
@@ -40,10 +47,12 @@ class AppState {
   incoming = $state<FriendEntry[]>([]);
   outgoing = $state<FriendEntry[]>([]);
   messages = $state<Record<string, Message[]>>({});
+  unread = $state<Record<string, number>>({});
   active = $state<ActiveView>({ kind: "friends" });
   wsOpen = $state(false);
   ready = $state(false);
   error = $state("");
+  profileOpen = $state(false);
 
   private ws: WebSocket | null = null;
 
@@ -79,6 +88,7 @@ class AppState {
   }
 
   logout() {
+    call.hangup();
     this.ws?.close();
     this.ws = null;
     clearSession();
@@ -89,8 +99,10 @@ class AppState {
     this.incoming = [];
     this.outgoing = [];
     this.messages = {};
+    this.unread = {};
     this.active = { kind: "friends" };
     this.wsOpen = false;
+    this.profileOpen = false;
   }
 
   private connect() {
@@ -115,6 +127,11 @@ class AppState {
     this.ws = ws;
   }
 
+  sendSignal(to: string, payload: Record<string, unknown>) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({ type: "signal", to, payload }));
+  }
+
   private handle(event: WsEvent) {
     if (event.type === "message" && event.message.channel_id) {
       this.pushMessage(`c:${event.message.channel_id}`, event.message);
@@ -137,8 +154,29 @@ class AppState {
       void this.refreshFriends();
       return;
     }
+    if (event.type === "channel_create") {
+      if (!this.channels.some((c) => c.id === event.channel.id)) {
+        this.channels = [...this.channels, event.channel].sort((a, b) => a.name.localeCompare(b.name));
+      }
+      return;
+    }
+    if (event.type === "profile_updated") {
+      if (this.session && event.user.id === this.session.user.id) {
+        this.session = { ...this.session, user: event.user };
+        saveSession(this.session);
+      }
+      return;
+    }
+    if (event.type === "signal") {
+      call.onSignal(event);
+      return;
+    }
     if (event.type === "presence") {
       this.friends = this.friends.map((f) => (f.id === event.user_id ? { ...f, online: event.online } : f));
+      this.dms = this.dms.map((d) => ({
+        ...d,
+        members: d.members.map((m) => (m.id === event.user_id ? { ...m, online: event.online } : m)),
+      }));
     }
   }
 
@@ -146,6 +184,9 @@ class AppState {
     const list = this.messages[key] ?? [];
     if (list.some((m) => m.id === message.id)) return;
     this.messages[key] = [...list, message];
+    if (message.user.id !== this.session?.user.id && this.viewKey() !== key) {
+      this.unread = { ...this.unread, [key]: (this.unread[key] ?? 0) + 1 };
+    }
   }
 
   private touchDm(conversationId: string, message: Message) {
@@ -220,6 +261,13 @@ class AppState {
     }
   }
 
+  private clearUnread(key: string) {
+    if (!key) return;
+    if (this.unread[key]) {
+      this.unread = { ...this.unread, [key]: 0 };
+    }
+  }
+
   async openFriends() {
     this.active = { kind: "friends" };
     await this.refreshFriends();
@@ -227,23 +275,27 @@ class AppState {
 
   async openChannel(id: string) {
     this.active = { kind: "channel", id };
+    const key = this.viewKey();
+    this.clearUnread(key);
     await this.ensureHistory();
   }
 
   async openDm(id: string) {
     this.active = { kind: "dm", id };
+    const key = this.viewKey();
+    this.clearUnread(key);
     await this.ensureHistory();
   }
 
-  async sendMessage(content: string) {
+  async sendMessage(content: string, attachments: string[] = []) {
     if (!this.session) return;
     const text = content.trim();
-    if (!text) return;
+    if (!text && attachments.length === 0) return;
     const view = this.active;
     if (view.kind === "channel") {
-      await sendChannelMessage(this.base, this.token, view.id, text);
+      await sendChannelMessage(this.base, this.token, view.id, text, attachments);
     } else if (view.kind === "dm") {
-      await sendDmMessage(this.base, this.token, view.id, text);
+      await sendDmMessage(this.base, this.token, view.id, text, attachments);
     }
   }
 
@@ -290,9 +342,15 @@ class AppState {
 
   async addChannel(name: string) {
     if (!this.session) return;
-    const { createChannel } = await import("./api");
     await createChannel(this.base, this.token, name);
     await this.refreshChannels();
+  }
+
+  async updateProfile(patch: { display_name?: string; status?: string; bio?: string; avatar_url?: string | null }) {
+    if (!this.session) throw new Error("Нет сессии");
+    const { user } = await updateMe(this.base, this.token, patch);
+    this.session = { ...this.session, user };
+    saveSession(this.session);
   }
 }
 

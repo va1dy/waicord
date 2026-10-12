@@ -2,27 +2,28 @@
   import Avatar from "./Avatar.svelte";
   import ChatView from "./ChatView.svelte";
   import FriendsPage from "../pages/FriendsPage.svelte";
+  import ProfileModal from "./ProfileModal.svelte";
+  import CallPanel from "./CallPanel.svelte";
   import { app } from "../lib/app.svelte";
 
   let newChannel = $state("");
   let addingChannel = $state(false);
   let channelError = $state("");
 
+  const me = $derived(app.session?.user);
+
   function dmTitle(id: string): string {
     const conv = app.dms.find((d) => d.id === id);
     if (!conv) return "чат";
     if (conv.kind === "group") return conv.name ?? "Группа";
     const other = conv.members.find((m) => m.id !== app.session?.user.id) ?? conv.members[0];
-    return other?.username ?? "чат";
+    return other?.display_name || other?.username || "чат";
   }
 
-  function dmOnline(id: string): boolean {
+  function dmOther(id: string) {
     const conv = app.dms.find((d) => d.id === id);
-    if (!conv || conv.kind !== "dm") return false;
-    const other = conv.members.find((m) => m.id !== app.session?.user.id);
-    if (!other) return false;
-    const friend = app.friends.find((f) => f.id === other.id);
-    return !!friend?.online;
+    if (!conv || conv.kind !== "dm") return undefined;
+    return conv.members.find((m) => m.id !== app.session?.user.id) ?? conv.members[0];
   }
 
   async function submitChannel(event: Event) {
@@ -94,6 +95,7 @@
           <p class="px-2.5 py-1 text-[12px] text-fg-muted/70">Пока пусто</p>
         {/if}
         {#each app.dms as conv (conv.id)}
+          {@const other = dmOther(conv.id)}
           <button
             type="button"
             onclick={() => app.openDm(conv.id)}
@@ -105,15 +107,19 @@
             {#if conv.kind === "group"}
               <span class="grid size-[30px] shrink-0 place-items-center rounded-full bg-panel-soft text-[13px]" aria-hidden="true">👥</span>
             {:else}
-              {@const other = conv.members.find((m) => m.id !== app.session?.user.id) ?? conv.members[0]}
               <span class="relative shrink-0">
-                <Avatar username={other?.username ?? "?"} size={30} />
-                {#if dmOnline(conv.id)}
+                <Avatar username={other?.username ?? "?"} url={other?.avatar_url ?? null} size={30} />
+                {#if other?.online}
                   <span class="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-panel bg-emerald-400"></span>
                 {/if}
               </span>
             {/if}
             <span class="truncate">{dmTitle(conv.id)}</span>
+            {#if (app.unread[`d:${conv.id}`] ?? 0) > 0 && !(app.active.kind === "dm" && app.active.id === conv.id)}
+              <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
+                {app.unread[`d:${conv.id}`]}
+              </span>
+            {/if}
           </button>
         {/each}
       </div>
@@ -156,6 +162,11 @@
           >
             <span class="text-fg-muted/60" aria-hidden="true">#</span>
             <span class="truncate">{ch.name}</span>
+            {#if (app.unread[`c:${ch.id}`] ?? 0) > 0 && !(app.active.kind === "channel" && app.active.id === ch.id)}
+              <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
+                {app.unread[`c:${ch.id}`]}
+              </span>
+            {/if}
           </button>
         {/each}
       </div>
@@ -163,11 +174,13 @@
 
     <footer class="shrink-0 border-t border-line/60 bg-panel-soft/40 px-3 py-2">
       <div class="flex items-center gap-2.5">
-        <Avatar username={app.session?.user.username ?? "?"} size={32} />
-        <div class="min-w-0 flex-1">
-          <p class="truncate text-[13px] font-semibold">{app.session?.user.username}</p>
-          <p class="truncate text-[11px] text-fg-muted">{app.session?.user.email}</p>
-        </div>
+        <button type="button" onclick={() => (app.profileOpen = true)} class="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left transition hover:bg-white/5" title="Настройки профиля">
+          <Avatar username={me?.username ?? "?"} url={me?.avatar_url ?? null} size={32} />
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-[13px] font-semibold">{me?.display_name || me?.username}</p>
+            <p class="truncate text-[11px] text-fg-muted">{me?.status || me?.username}</p>
+          </div>
+        </button>
         <button
           type="button"
           onclick={logout}
@@ -198,3 +211,6 @@
     {/if}
   </main>
 </div>
+
+<ProfileModal />
+<CallPanel />

@@ -3,6 +3,19 @@ export interface User {
   username: string;
   email: string;
   created_at: number;
+  display_name?: string | null;
+  status?: string | null;
+  bio?: string | null;
+  avatar_url?: string | null;
+}
+
+export interface UserBrief {
+  id: string;
+  username: string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  status?: string | null;
+  online?: boolean;
 }
 
 export interface Session {
@@ -23,12 +36,16 @@ export interface Message {
   conversation_id?: string;
   content: string;
   created_at: number;
-  user: { id: string; username: string };
+  attachments?: string[];
+  user: UserBrief;
 }
 
 export interface FriendEntry {
   id: string;
   username: string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  status?: string | null;
   online?: boolean;
   request_id?: string;
 }
@@ -37,7 +54,7 @@ export interface DmConversation {
   id: string;
   kind: "dm" | "group";
   name: string | null;
-  members: { id: string; username: string }[];
+  members: UserBrief[];
   last: { content: string; created_at: number; username: string } | null;
 }
 
@@ -119,11 +136,12 @@ export async function sendChannelMessage(
   token: string,
   channelId: string,
   content: string,
+  attachments: string[] = [],
 ): Promise<{ message: Message }> {
   return request(base, `/api/channels/${channelId}/messages`, {
     method: "POST",
     headers: auth(token),
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, attachments }),
   });
 }
 
@@ -191,12 +209,67 @@ export async function sendDmMessage(
   token: string,
   conversationId: string,
   content: string,
+  attachments: string[] = [],
 ): Promise<{ message: Message }> {
   return request(base, `/api/dms/${conversationId}/messages`, {
     method: "POST",
     headers: auth(token),
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, attachments }),
   });
+}
+
+export async function uploadFile(
+  base: string,
+  token: string,
+  file: File,
+): Promise<{ url: string; name: string; size: number }> {
+  const data = await fileToBase64(file);
+  return request(base, "/api/upload", {
+    method: "POST",
+    headers: auth(token),
+    body: JSON.stringify({ name: file.name, data }),
+  });
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.split(",")[1]! : result);
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function updateMe(
+  base: string,
+  token: string,
+  patch: { display_name?: string; status?: string; bio?: string; avatar_url?: string | null },
+): Promise<{ user: User }> {
+  return request(base, "/api/me", {
+    method: "PATCH",
+    headers: auth(token),
+    body: JSON.stringify(patch),
+  });
+}
+
+const GIPHY_KEY = "dc6zaTOxFJmzC";
+
+export async function searchGifs(query: string, limit = 12): Promise<string[]> {
+  const url = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=${limit}&rating=g&lang=ru`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw new Error("Giphy недоступен — попробуй позже или загрузи GIF файлом");
+  }
+  const data = (await res.json().catch(() => null)) as {
+    data?: { images?: { fixed_width?: { url?: string } } }[];
+  } | null;
+  if (!res.ok || !data?.data) throw new Error("Не удалось найти гифки");
+  return data.data.map((g) => g.images?.fixed_width?.url ?? "").filter(Boolean);
 }
 
 const SESSION_KEY = "waicord.session";

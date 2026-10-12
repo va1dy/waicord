@@ -129,8 +129,8 @@
         {/if}
         {#each app.incoming as req (req.request_id)}
           <div class="mt-2 flex items-center gap-3 rounded-xl border border-line/50 bg-panel/40 px-3 py-2">
-            <Avatar username={req.username} size={32} />
-            <span class="min-w-0 flex-1 truncate text-[14px] font-medium">{req.username}</span>
+            <Avatar username={req.username} url={req.avatar_url ?? null} size={32} />
+            <span class="min-w-0 flex-1 truncate text-[14px] font-medium">{req.display_name || req.username}</span>
             <button
               type="button"
               onclick={() => req.request_id && app.acceptRequest(req.request_id)}
@@ -154,8 +154,8 @@
         {/if}
         {#each app.outgoing as req (req.request_id)}
           <div class="mt-2 flex items-center gap-3 rounded-xl border border-line/50 bg-panel/40 px-3 py-2">
-            <Avatar username={req.username} size={32} />
-            <span class="min-w-0 flex-1 truncate text-[14px] font-medium">{req.username}</span>
+            <Avatar username={req.username} url={req.avatar_url ?? null} size={32} />
+            <span class="min-w-0 flex-1 truncate text-[14px] font-medium">{req.display_name || req.username}</span>
             <span class="text-[12px] text-fg-muted">Ожидает ответа</span>
             <button
               type="button"
@@ -189,8 +189,8 @@
             {#each app.friends as f (f.id)}
               <label class="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-panel-soft/60">
                 <input type="checkbox" checked={groupSel.includes(f.id)} onchange={() => toggleGroup(f.id)} class="accent-accent" />
-                <Avatar username={f.username} size={24} />
-                <span class="text-[14px]">{f.username}</span>
+                <Avatar username={f.username} url={f.avatar_url ?? null} size={24} />
+                <span class="text-[14px]">{f.display_name || f.username}</span>
                 {#if f.online}
                   <span class="ml-auto size-2 rounded-full bg-emerald-400" aria-label="онлайн"></span>
                 {/if}
@@ -218,14 +218,14 @@
         {#each app.friends as f (f.id)}
           <div class="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-panel-soft/50">
             <div class="relative">
-              <Avatar username={f.username} size={34} />
+              <Avatar username={f.username} url={f.avatar_url ?? null} size={34} />
               {#if f.online}
                 <span class="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-ink bg-emerald-400"></span>
               {/if}
             </div>
             <div class="min-w-0 flex-1">
-              <p class="truncate text-[14px] font-medium">{f.username}</p>
-              <p class="text-[12px] text-fg-muted">{f.online ? "в сети" : "не в сети"}</p>
+              <p class="truncate text-[14px] font-medium">{f.display_name || f.username}</p>
+              <p class="text-[12px] text-fg-muted">{f.online ? (f.status || "в сети") : (f.status ? `${f.status} · не в сети` : "не в сети")}</p>
             </div>
             <button
               type="button"
