@@ -4,55 +4,50 @@
 
 Rules for humans + AI agents. **Read before every session.**
 
-## 0. Who owns what
+## 0. Статус проекта
 
-Two humans: **Dev A** = _UI_, **Dev B** = _логика/бэкенд_. Each has their own AI assistant.
+Стек и бэкенд **не выбраны**. Любой новый фреймворк/зависимость — обсуждаем вдвоём, решение записываем в `docs/ARCHITECTURE.md`. Не додумываем за другого.
 
-| Path | Dev A (UI) | Dev B (logic) |
-|---|---|---|
-| `apps/web/src/components/**` | own | read-only |
-| `apps/web/src/app/**` | own | read-only |
-| `apps/web/src/lib/**`, `apps/web/src/server/**` | read-only | own |
-| shared (see list) | PR + both approvals | PR + both approvals |
+## 1. Кто что делает (чтобы не мешать друг другу)
 
-**Shared files — change only via PR reviewed by BOTH humans:**
-`package.json`, `pnpm-workspace.yaml`, root configs, `AGENTS.md`, `LICENSE`, `.env.example`, `.github/**`, `docs/ARCHITECTURE.md`
+Пока нет структуры папок — работаем в **отдельных ветках**:
 
-If a task needs a shared file — stop, ask your human, open a PR.
+- Dev A → `feature/a/<short-name>`
+- Dev B → `feature/b/<short-name>`
 
-## 1. Stack (locked until both agree)
+Когда стек выбран — разделим папки (например, UI vs логика) и запишем владение в эту таблицу здесь.
 
-- Node.js >= 20, pnpm workspaces
-- `apps/web` — Next.js + React (TypeScript)
-- New dependency = PR with a reason. No silent `npm install`.
+**Общие файлы — только через PR с одобрением обоих:**
+`package.json`, `AGENTS.md`, `LICENSE`, `docs/**`, root configs, `.github/**`
+
+Если задача требует общий файл — стоп, спроси своего человека.
 
 ## 2. Git workflow
 
-- `main` is protected: no direct commits, no force-push, no `reset --hard`.
-- Branch names: `feature/<a|b>/<short-name>`, `fix/<a|b>/<short-name>`.
-- Commits: Conventional Commits — `feat(web): …`, `fix: …`, `docs: …`, `chore: …`
-- Before starting work: `git fetch origin && git rebase origin/main`
-- Small PRs, one logical change each.
+- `main` защищена: нет прямых коммитов, нет force-push, нет `reset --hard`.
+- Commits: Conventional Commits — `feat: …`, `fix: …`, `docs: …`, `chore: …`
+- Перед работой: `git fetch origin && git rebase origin/main`
+- Маленькие PRs, одно логическое изменение.
 
-## 3. AI agents must
+## 3. ИИ-ассистенты должны
 
-1. Work only inside your human's owned paths; anything shared → stop and ask the human.
-2. Before declaring done, run `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm test` and fix all failures.
-3. Never invent or store secrets; tokens live only in `.env` (gitignored); update `.env.example` via PR.
-4. Keep diffs minimal: no drive-by refactors, no reformatting untouched files.
-5. Never auto-resolve merge conflicts, never force-push, never commit on behalf of humans.
-6. Match existing code style; no comments unless non-obvious.
-7. If both AI sessions touched the same file — humans decide, agents wait.
+1. Работать только в зоне своего человека; что-то общее → стоп и вопрос человеку.
+2. Не придумывать архитектуру/стек за нас — если непонятно, спрашивает человека.
+3. Перед «готово» — запустить проверки (install/lint/typecheck/test, если настроены) и починить ошибки.
+4. Минимальные diff'ы: без рефакторов «по пути», без форматирования чужих файлов.
+5. Никогда: force-push, авто-разрешение конфликтов, коммиты от имени человека, секреты в коде (токены — только в `.env`, gitignored).
+6. Стиль = как в соседнем коде; комментарии только для неочевидного.
+7. Если оба ИИ тронули один файл — решают люди, ИИ ждёт.
 
-## 4. PR checklist
+## 4. Чеклист PR
 
-- [ ] typecheck, lint, tests green
-- [ ] no secrets in diff
-- [ ] PR title = Conventional Commit, body explains what & why
-- [ ] shared-file PR → both humans approved
+- [ ] проверки зелёные (если настроены)
+- [ ] нет секретов в diff
+- [ ] заголовок = Conventional Commit, тело объясняет что и зачем
+- [ ] общий файл → одобрение обоих людей
 
-## 5. Sync
+## 5. Синк
 
-- Start of session: pull `main`, check open PRs.
-- Border questions (UI ↔ logic/API): decide together, record in `docs/ARCHITECTURE.md`.
-- When in doubt — ask a human. A question costs a minute, a broken `main` costs an evening.
+- Начало сессии: pull `main`, глянуть открытые PRs.
+- Спорные вопросы — решаем вместе, записываем в `docs/ARCHITECTURE.md`.
+- Сомневаешься — спроси человека. Вопрос = минута, сломанный `main` = вечер.
