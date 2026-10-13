@@ -1,276 +1,212 @@
-export interface User {
+const BASE = "http://127.0.0.1:8787";
+
+export interface UserDTO {
   id: string;
   username: string;
-  email: string;
-  created_at: number;
-  display_name?: string | null;
-  status?: string | null;
-  bio?: string | null;
-  avatar_url?: string | null;
+  displayName: string;
+  avatarUrl: string | null;
+  defaultAvatarIndex: number;
+  bot: boolean;
 }
 
-export interface UserBrief {
+export interface AttachmentDTO {
   id: string;
-  username: string;
-  display_name?: string | null;
-  avatar_url?: string | null;
-  status?: string | null;
-  online?: boolean;
+  filename: string;
+  url: string;
+  proxyUrl: string;
+  width?: number | null;
+  height?: number | null;
+  size?: number;
+  contentType?: string | null;
 }
 
-export interface Session {
-  server: string;
-  token: string;
-  user: User;
+export interface EmbedDTO {
+  title?: string;
+  description?: string;
+  url?: string;
+  color?: number;
+  image?: { url: string };
+  thumbnail?: { url: string };
 }
 
-export interface Channel {
+export interface MessageDTO {
+  id: string;
+  channelId: string;
+  author: UserDTO;
+  content: string;
+  timestamp: string;
+  editedTimestamp: string | null;
+  attachments: AttachmentDTO[];
+  embeds: EmbedDTO[];
+  mentions: string[];
+  pinned: boolean;
+  type: number;
+  referenceMessageId: string | null;
+}
+
+export interface ChatDTO {
+  id: string;
+  kind: "dm" | "group" | "guild";
+  name: string;
+  avatarUrl: string | null;
+  recipients: UserDTO[];
+  guildId: string | null;
+  parentId: string | null;
+  lastMessageId: string | null;
+  type: number;
+  raw: Record<string, unknown>;
+}
+
+export interface GuildDTO {
   id: string;
   name: string;
-  created_at: number;
+  iconUrl: string | null;
+  owner: boolean;
+  memberCount: number | null;
+  features: string[];
 }
 
-export type Attachment = string | { url: string; name?: string };
-
-export function attUrl(a: Attachment): string {
-  return typeof a === "string" ? a : a.url;
+export interface GatewayStateDTO {
+  connected: boolean;
+  sessionId: string | null;
+  eventsReceived: number;
+  lastEventAt: string | null;
+  reconnects: number;
 }
 
-export function attName(a: Attachment): string {
-  if (typeof a === "string") return decodeURIComponent(a.split("/").pop() ?? "файл");
-  return a.name || decodeURIComponent(a.url.split("/").pop() ?? "файл");
+export interface StateDTO {
+  me: UserDTO | null;
+  chats: ChatDTO[];
+  gateway: GatewayStateDTO;
 }
 
-export function resolveAttUrl(a: Attachment, base: string): string {
-  const url = attUrl(a);
-  if (url.startsWith("/")) return base.replace(/\/$/, "") + url;
-  return url;
+export type AuthChallenge =
+  | { type: "mfa"; methods: Array<"totp" | "sms" | "webauthn">; ticket: string; loginInstanceId: string | null; maskedEmail?: string | null }
+  | { type: "phone"; reason: string; message: string }
+  | { type: "email_code"; reason: string; message: string }
+  | { type: "captcha"; captchaKey: string | null; captchaSitekey: string | null }
+  | { type: "locked"; reason: string; message: string };
+
+export interface AuthResponse {
+  authenticated: boolean;
+  me: UserDTO | null;
+  challenge: AuthChallenge | null;
+  error: { code: string; message: string } | null;
 }
 
-export interface Message {
-  id: string;
-  channel_id?: string;
-  conversation_id?: string;
-  content: string;
-  created_at: number;
-  attachments?: Attachment[];
-  user: UserBrief;
+export interface QrStateDTO {
+  status: "idle" | "waiting" | "scanned" | "approved" | "cancelled" | "expired" | "error";
+  url: string | null;
+  qrImage: string | null;
+  fingerprint: string | null;
+  expiresAt: string | null;
+  user: { id: string; username: string; avatarUrl: string | null } | null;
+  token: string | null;
+  error: string | null;
 }
 
-export interface FriendEntry {
-  id: string;
-  username: string;
-  display_name?: string | null;
-  avatar_url?: string | null;
-  status?: string | null;
-  online?: boolean;
-  request_id?: string;
+export interface EventFrame {
+  t: string;
+  d: unknown;
+  s: number | null;
+  ts: string;
 }
 
-export interface DmConversation {
-  id: string;
-  kind: "dm" | "group";
-  name: string | null;
-  members: UserBrief[];
-  last: { content: string; created_at: number; username: string } | null;
-}
+export const EVENTS_URL = "ws://127.0.0.1:8787/events";
 
-export function normalizeServer(raw: string): string {
-  let s = raw.trim().replace(/\/+$/, "");
-  if (!s) return "";
-  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
-  return s;
-}
-
-async function request<T>(base: string, path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+    res = await fetch(BASE + path, {
+      method: init?.method ?? "GET",
+      headers: { "Content-Type": "application/json" },
+      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
   } catch {
-    throw new Error("Сервер недоступен — проверь адрес");
+    throw new Error("Мост dsmod не запущен — запусти `bun start` в apps/dsmod");
   }
-  const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok) throw new Error(data?.error ?? `Ошибка сервера (${res.status})`);
-  return data as T;
+  const payload = (await res.json().catch(() => null)) as
+    | { ok: true; data: T }
+    | { ok: false; error: { code: string; message: string } }
+    | null;
+  if (!payload) throw new Error(`Мост ответил неожиданно (${res.status})`);
+  if (!payload.ok) throw new Error(payload.error.message || "Ошибка моста");
+  return payload.data;
 }
 
-function auth(token: string): Record<string, string> {
-  return { Authorization: `Bearer ${token}` };
+export function fetchState(): Promise<StateDTO> {
+  return request("/api/state");
 }
 
-export async function health(base: string): Promise<{ ok: boolean; name: string; version: string }> {
-  return request(base, "/api/health");
+export function authLogin(email: string, password: string): Promise<AuthResponse> {
+  return request("/api/auth/login", { method: "POST", body: { email, password } });
 }
 
-export async function login(base: string, identifier: string, password: string): Promise<{ token: string; user: User }> {
-  return request(base, "/api/login", {
-    method: "POST",
-    body: JSON.stringify({ identifier, password }),
-  });
+export function authMfa(payload: {
+  ticket: string;
+  loginInstanceId: string | null;
+  method: "totp" | "sms";
+  code: string;
+}): Promise<AuthResponse> {
+  return request("/api/auth/mfa", { method: "POST", body: payload });
 }
 
-export async function register(
-  base: string,
-  username: string,
-  email: string,
-  password: string,
-): Promise<{ token: string; user: User }> {
-  return request(base, "/api/register", {
-    method: "POST",
-    body: JSON.stringify({ username, email, password }),
-  });
+export function authSms(ticket: string): Promise<{ phone: string }> {
+  return request("/api/auth/sms", { method: "POST", body: { ticket } });
 }
 
-export async function me(base: string, token: string): Promise<{ user: User }> {
-  return request(base, "/api/me", { headers: auth(token) });
+export function authToken(token: string): Promise<{ authenticated: boolean; me: UserDTO | null }> {
+  return request("/api/auth/token", { method: "POST", body: { token } });
 }
 
-export async function listChannels(base: string, token: string): Promise<{ channels: Channel[] }> {
-  return request(base, "/api/channels", { headers: auth(token) });
+export function authQrStart(): Promise<{ url: string; qrImage: string | null; state: QrStateDTO }> {
+  return request("/api/auth/qr", { method: "POST" });
 }
 
-export async function createChannel(base: string, token: string, name: string): Promise<{ channel: Channel }> {
-  return request(base, "/api/channels", {
-    method: "POST",
-    headers: auth(token),
-    body: JSON.stringify({ name }),
-  });
+export function authQrState(): Promise<QrStateDTO> {
+  return request("/api/auth/qr");
 }
 
-export async function channelMessages(
-  base: string,
-  token: string,
+export function authQrCancel(): Promise<QrStateDTO> {
+  return request("/api/auth/qr/cancel", { method: "POST" });
+}
+
+export function authLogout(): Promise<{ authenticated: boolean }> {
+  return request("/api/auth/logout", { method: "POST" });
+}
+
+export function channelMessages(
   channelId: string,
-): Promise<{ messages: Message[] }> {
-  return request(base, `/api/channels/${channelId}/messages`, { headers: auth(token) });
+  opts: { limit?: number; before?: string } = {},
+): Promise<MessageDTO[]> {
+  const q = new URLSearchParams();
+  q.set("limit", String(opts.limit ?? 50));
+  if (opts.before) q.set("before", opts.before);
+  return request(`/api/channels/${channelId}/messages?${q}`);
 }
 
-export async function sendChannelMessage(
-  base: string,
-  token: string,
-  channelId: string,
-  content: string,
-  attachments: Attachment[] = [],
-): Promise<{ message: Message }> {
-  return request(base, `/api/channels/${channelId}/messages`, {
-    method: "POST",
-    headers: auth(token),
-    body: JSON.stringify({ content, attachments }),
-  });
+export function sendMessage(channelId: string, content: string): Promise<MessageDTO> {
+  return request(`/api/channels/${channelId}/messages`, { method: "POST", body: { content } });
 }
 
-export async function listFriends(
-  base: string,
-  token: string,
-): Promise<{ friends: FriendEntry[]; incoming: FriendEntry[]; outgoing: FriendEntry[] }> {
-  return request(base, "/api/friends", { headers: auth(token) });
+export function sendTyping(channelId: string): Promise<{ ok: true }> {
+  return request(`/api/channels/${channelId}/typing`, { method: "POST" });
 }
 
-export async function sendFriendRequest(
-  base: string,
-  token: string,
-  username: string,
-): Promise<{ ok: boolean; accepted?: boolean; request_id?: string }> {
-  return request(base, "/api/friends/requests", {
-    method: "POST",
-    headers: auth(token),
-    body: JSON.stringify({ username }),
-  });
+export function listGuilds(): Promise<GuildDTO[]> {
+  return request("/api/guilds");
 }
 
-export async function acceptFriendRequest(base: string, token: string, requestId: string): Promise<{ ok: boolean }> {
-  return request(base, `/api/friends/requests/${requestId}/accept`, {
-    method: "POST",
-    headers: auth(token),
-  });
+export function guildChannels(guildId: string): Promise<ChatDTO[]> {
+  return request(`/api/guilds/${guildId}/channels`);
 }
 
-export async function declineFriendRequest(base: string, token: string, requestId: string): Promise<{ ok: boolean }> {
-  return request(base, `/api/friends/requests/${requestId}/decline`, {
-    method: "POST",
-    headers: auth(token),
-  });
+export function defaultAvatarUrl(u: Pick<UserDTO, "defaultAvatarIndex">): string {
+  return `https://cdn.discordapp.com/embed/avatars/${u.defaultAvatarIndex}.png`;
 }
 
-export async function removeFriend(base: string, token: string, userId: string): Promise<{ ok: boolean }> {
-  return request(base, `/api/friends/${userId}`, { method: "DELETE", headers: auth(token) });
-}
-
-export async function listDms(base: string, token: string): Promise<{ conversations: DmConversation[] }> {
-  return request(base, "/api/dms", { headers: auth(token) });
-}
-
-export async function createDm(
-  base: string,
-  token: string,
-  usernames: string[],
-  name?: string,
-  kind?: "dm" | "group",
-): Promise<{ conversation_id: string }> {
-  return request(base, "/api/dms", {
-    method: "POST",
-    headers: auth(token),
-    body: JSON.stringify({ usernames, name, kind }),
-  });
-}
-
-export async function dmMessages(base: string, token: string, conversationId: string): Promise<{ messages: Message[] }> {
-  return request(base, `/api/dms/${conversationId}/messages`, { headers: auth(token) });
-}
-
-export async function sendDmMessage(
-  base: string,
-  token: string,
-  conversationId: string,
-  content: string,
-  attachments: Attachment[] = [],
-): Promise<{ message: Message }> {
-  return request(base, `/api/dms/${conversationId}/messages`, {
-    method: "POST",
-    headers: auth(token),
-    body: JSON.stringify({ content, attachments }),
-  });
-}
-
-export async function uploadFile(
-  base: string,
-  token: string,
-  file: File,
-): Promise<{ url: string; name: string; size: number }> {
-  const data = await fileToBase64(file);
-  const res = await request<{ url: string; name: string; size: number }>(base, "/api/upload", {
-    method: "POST",
-    headers: auth(token),
-    body: JSON.stringify({ name: file.name, data }),
-  });
-  return { ...res, url: base.replace(/\/$/, "") + res.url };
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result ?? "");
-      resolve(result.includes(",") ? result.split(",")[1]! : result);
-    };
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
-    reader.readAsDataURL(file);
-  });
-}
-
-export async function updateMe(
-  base: string,
-  token: string,
-  patch: { display_name?: string; status?: string; bio?: string; avatar_url?: string | null },
-): Promise<{ user: User }> {
-  return request(base, "/api/me", {
-    method: "PATCH",
-    headers: auth(token),
-    body: JSON.stringify(patch),
-  });
+export function avatarOf(u: Pick<UserDTO, "avatarUrl" | "defaultAvatarIndex"> | null | undefined): string | null {
+  return u?.avatarUrl ?? (u ? defaultAvatarUrl(u) : null);
 }
 
 const GIPHY_KEY = "dc6zaTOxFJmzC";
@@ -281,30 +217,11 @@ export async function searchGifs(query: string, limit = 12): Promise<string[]> {
   try {
     res = await fetch(url);
   } catch {
-    throw new Error("Giphy недоступен — попробуй позже или загрузи GIF файлом");
+    throw new Error("Giphy недоступен — попробуй позже");
   }
   const data = (await res.json().catch(() => null)) as {
     data?: { images?: { fixed_width?: { url?: string } } }[];
   } | null;
   if (!res.ok || !data?.data) throw new Error("Не удалось найти гифки");
   return data.data.map((g) => g.images?.fixed_width?.url ?? "").filter(Boolean);
-}
-
-const SESSION_KEY = "waicord.session";
-
-export function loadSession(): Session | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveSession(session: Session): void {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-}
-
-export function clearSession(): void {
-  localStorage.removeItem(SESSION_KEY);
 }

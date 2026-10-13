@@ -2,46 +2,30 @@
   import Avatar from "./Avatar.svelte";
   import ChatView from "./ChatView.svelte";
   import FriendsPage from "../pages/FriendsPage.svelte";
-  import ProfileModal from "./ProfileModal.svelte";
-  import CallPanel from "./CallPanel.svelte";
   import { app } from "../lib/app.svelte";
+  import { avatarOf, type ChatDTO, type UserDTO } from "../lib/api";
 
-  let newChannel = $state("");
-  let addingChannel = $state(false);
-  let channelError = $state("");
+  const dmChats = $derived(app.chats.filter((c) => c.kind === "dm" || c.kind === "group"));
+  const pendingCount = $derived(app.pendingCount());
 
-  const me = $derived(app.session?.user);
-
-  function dmTitle(id: string): string {
-    const conv = app.dms.find((d) => d.id === id);
-    if (!conv) return "чат";
-    if (conv.kind === "group") return conv.name ?? "Группа";
-    const other = conv.members.find((m) => m.id !== app.session?.user.id) ?? conv.members[0];
-    return other?.display_name || other?.username || "чат";
+  function dmTitle(chat: ChatDTO): string {
+    if (chat.kind === "group") return chat.name || "Группа";
+    const other = chat.recipients.find((u) => u.id !== app.me?.id) ?? chat.recipients[0];
+    return other?.displayName || other?.username || "чат";
   }
 
-  function dmOther(id: string) {
-    const conv = app.dms.find((d) => d.id === id);
-    if (!conv || conv.kind !== "dm") return undefined;
-    return conv.members.find((m) => m.id !== app.session?.user.id) ?? conv.members[0];
+  function dmPeer(chat: ChatDTO): UserDTO | undefined {
+    if (chat.kind !== "dm") return undefined;
+    return chat.recipients.find((u) => u.id !== app.me?.id) ?? chat.recipients[0];
   }
 
-  async function submitChannel(event: Event) {
-    event.preventDefault();
-    const name = newChannel.trim();
-    if (!name) return;
-    channelError = "";
-    try {
-      await app.addChannel(name);
-      newChannel = "";
-      addingChannel = false;
-    } catch (error) {
-      channelError = error instanceof Error ? error.message : "Не удалось создать канал";
-    }
+  function chatActive(id: string): boolean {
+    const view = app.active;
+    return view.kind === "chat" && view.id === id;
   }
 
   function logout() {
-    app.logout();
+    void app.logout();
   }
 </script>
 
@@ -49,17 +33,19 @@
   <aside class="flex w-64 shrink-0 flex-col border-r border-line/60 bg-panel/50">
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 px-4">
       <img src="/waicord-mark.svg" class="size-4" alt="" aria-hidden="true" />
-      <span class="truncate text-[13px] font-semibold">{app.session?.server.replace(/^https?:\/\//, "")}</span>
+      <span class="truncate text-[13px] font-semibold">Discord</span>
       <span
-        class="ml-auto size-2 shrink-0 rounded-full {app.wsOpen ? 'bg-emerald-400' : 'bg-fg-muted/40'}"
-        title={app.wsOpen ? "подключено" : "нет соединения"}
+        class="ml-auto size-2 shrink-0 rounded-full {app.gatewayStatus === 'ready'
+          ? 'bg-emerald-400'
+          : 'bg-fg-muted/40'}"
+        title={app.gatewayStatus}
       ></span>
     </div>
 
     <nav class="min-h-0 flex-1 overflow-y-auto p-2 text-[13px]">
       <button
         type="button"
-        onclick={() => app.openFriends()}
+        onclick={() => void app.openFriends()}
         class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 font-medium transition {app.active.kind === 'friends'
           ? 'bg-panel-soft text-fg'
           : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
@@ -71,116 +57,93 @@
           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
         Друзья
-        {#if app.incomingCount > 0}
+        {#if pendingCount > 0}
           <span class="ml-auto grid min-w-5 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
-            {app.incomingCount}
+            {pendingCount}
           </span>
         {/if}
       </button>
 
       <div class="mt-4">
-        <div class="flex items-center justify-between px-2.5 pb-1">
+        <div class="px-2.5 pb-1">
           <span class="text-[11px] font-semibold tracking-wide text-fg-muted uppercase">Личные сообщения</span>
-          <button
-            type="button"
-            onclick={() => app.openFriends()}
-            class="grid size-6 place-items-center rounded-md text-fg-muted transition hover:bg-panel-soft hover:text-fg"
-            title="Написать или создать группу"
-            aria-label="Новое сообщение"
-          >
-            +
-          </button>
         </div>
-        {#if app.dms.length === 0}
+        {#if dmChats.length === 0}
           <p class="px-2.5 py-1 text-[12px] text-fg-muted/70">Пока пусто</p>
         {/if}
-        {#each app.dms as conv (conv.id)}
-          {@const other = dmOther(conv.id)}
+        {#each dmChats as chat (chat.id)}
+          {@const peer = dmPeer(chat)}
           <button
             type="button"
-            onclick={() => app.openDm(conv.id)}
-            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition {app.active.kind ===
-            'dm' && app.active.id === conv.id
+            onclick={() => void app.openChat(chat.id)}
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition {chatActive(chat.id)
               ? 'bg-panel-soft text-fg'
               : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
           >
-            {#if conv.kind === "group"}
+            {#if chat.kind === "group"}
               <span class="grid size-[30px] shrink-0 place-items-center rounded-full bg-panel-soft text-[13px]" aria-hidden="true">👥</span>
             {:else}
               <span class="relative shrink-0">
-                <Avatar username={other?.username ?? "?"} url={other?.avatar_url ?? null} size={30} />
-                {#if other?.online}
+                <Avatar username={peer?.username ?? "?"} url={avatarOf(peer)} defaultIndex={peer?.defaultAvatarIndex} size={30} />
+                {#if peer && app.presence[peer.id] === "online"}
                   <span class="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-panel bg-emerald-400"></span>
                 {/if}
               </span>
             {/if}
-            <span class="truncate">{dmTitle(conv.id)}</span>
-            {#if (app.unread[`d:${conv.id}`] ?? 0) > 0 && !(app.active.kind === "dm" && app.active.id === conv.id)}
+            <span class="truncate">{dmTitle(chat)}</span>
+            {#if (app.unread[chat.id] ?? 0) > 0 && !chatActive(chat.id)}
               <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
-                {app.unread[`d:${conv.id}`]}
+                {app.unread[chat.id]}
               </span>
             {/if}
           </button>
         {/each}
       </div>
 
-      <div class="mt-4">
-        <div class="flex items-center justify-between px-2.5 pb-1">
-          <span class="text-[11px] font-semibold tracking-wide text-fg-muted uppercase">Каналы</span>
-          <button
-            type="button"
-            onclick={() => (addingChannel = !addingChannel)}
-            class="grid size-6 place-items-center rounded-md text-fg-muted transition hover:bg-panel-soft hover:text-fg"
-            title="Создать канал"
-            aria-label="Создать канал"
-          >
-            +
-          </button>
+      {#if app.guilds.length > 0}
+        <div class="mt-4">
+          <div class="px-2.5 pb-1">
+            <span class="text-[11px] font-semibold tracking-wide text-fg-muted uppercase">Серверы</span>
+          </div>
+          {#each app.guilds as guild (guild.id)}
+            {@const channels = app.guildChannels[guild.id] ?? []}
+            <div class="mt-1">
+              <p class="truncate px-2.5 py-1 text-[12px] font-semibold text-fg/90">{guild.name}</p>
+              {#if channels.length === 0}
+                <p class="px-2.5 pb-1 text-[11px] text-fg-muted/60">Нет текстовых каналов</p>
+              {/if}
+              {#each channels as ch (ch.id)}
+                <button
+                  type="button"
+                  onclick={() => void app.openChat(ch.id)}
+                  class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1 text-left transition {chatActive(ch.id)
+                    ? 'bg-panel-soft text-fg'
+                    : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
+                >
+                  <span class="text-fg-muted/60" aria-hidden="true">#</span>
+                  <span class="truncate">{ch.name}</span>
+                  {#if (app.unread[ch.id] ?? 0) > 0 && !chatActive(ch.id)}
+                    <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
+                      {app.unread[ch.id]}
+                    </span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/each}
         </div>
-        {#if addingChannel}
-          <form onsubmit={submitChannel} class="px-2 pb-2">
-            <input
-              name="channel-name"
-              placeholder="имя-канала"
-              bind:value={newChannel}
-              autocomplete="off"
-              class="h-8 w-full rounded-lg border border-line bg-panel-soft px-2 text-[12px] text-fg outline-none placeholder:text-fg-muted/60 focus:border-accent"
-            />
-            {#if channelError}
-              <p class="mt-1 text-[11px] text-danger">{channelError}</p>
-            {/if}
-          </form>
-        {/if}
-        {#each app.channels as ch (ch.id)}
-          <button
-            type="button"
-            onclick={() => app.openChannel(ch.id)}
-            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition {app.active.kind ===
-            'channel' && app.active.id === ch.id
-              ? 'bg-panel-soft text-fg'
-              : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
-          >
-            <span class="text-fg-muted/60" aria-hidden="true">#</span>
-            <span class="truncate">{ch.name}</span>
-            {#if (app.unread[`c:${ch.id}`] ?? 0) > 0 && !(app.active.kind === "channel" && app.active.id === ch.id)}
-              <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
-                {app.unread[`c:${ch.id}`]}
-              </span>
-            {/if}
-          </button>
-        {/each}
-      </div>
+      {/if}
     </nav>
 
     <footer class="shrink-0 border-t border-line/60 bg-panel-soft/40 px-3 py-2">
       <div class="flex items-center gap-2.5">
-        <button type="button" onclick={() => (app.profileOpen = true)} class="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left transition hover:bg-white/5" title="Настройки профиля">
-          <Avatar username={me?.username ?? "?"} url={me?.avatar_url ?? null} size={32} />
+        <div class="flex min-w-0 flex-1 items-center gap-2.5">
+          <Avatar username={app.me?.username ?? "?"} url={avatarOf(app.me)} defaultIndex={app.me?.defaultAvatarIndex} size={32} />
           <div class="min-w-0 flex-1">
-            <p class="truncate text-[13px] font-semibold">{me?.display_name || me?.username}</p>
-            <p class="truncate text-[11px] text-fg-muted">{me?.status || me?.username}</p>
+            <p class="truncate text-[13px] font-semibold">{app.me?.displayName || app.me?.username}</p>
+            <p class="truncate text-[11px] text-fg-muted">@{app.me?.username}</p>
           </div>
-        </button>
+        </div>
         <button
           type="button"
           onclick={logout}
@@ -211,6 +174,3 @@
     {/if}
   </main>
 </div>
-
-<ProfileModal />
-<CallPanel />
