@@ -2,6 +2,7 @@
   import TitleBar from "./components/TitleBar.svelte";
   import Login from "./pages/Login.svelte";
   import AppShell from "./components/AppShell.svelte";
+  import AppBackground from "./components/AppBackground.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import { app } from "./lib/app.svelte";
   import { contextMenu } from "./lib/contextMenu.svelte";
@@ -28,17 +29,20 @@
 
 <svelte:window oncontextmenu={onContextMenu} />
 
-<div class="flex h-full min-h-0 flex-col">
-  <TitleBar />
-  <main class="min-h-0 flex-1">
-    {#if !app.ready}
-      <p class="grid h-full place-items-center text-[13px] text-fg-muted">Загрузка…</p>
-    {:else if app.me}
-      <AppShell />
-    {:else}
-      <Login />
-    {/if}
-  </main>
+<div class="relative h-full min-h-0">
+  <AppBackground />
+  <div class="relative z-10 flex h-full min-h-0 flex-col">
+    <TitleBar />
+    <main class="min-h-0 flex-1">
+      {#if !app.ready}
+        <p class="grid h-full place-items-center text-[13px] text-fg-muted">Загрузка…</p>
+      {:else if app.me}
+        <AppShell />
+      {:else}
+        <Login />
+      {/if}
+    </main>
+  </div>
 </div>
 
 <ContextMenu />

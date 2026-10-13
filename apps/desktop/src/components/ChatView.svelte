@@ -156,13 +156,56 @@
     });
   }
 
-  type Group = { authorId: string; author: string; avatarUrl: string | null; defaultIndex: number; id: string; items: MessageDTO[] };
+  type Group = {
+    authorId: string;
+    author: string;
+    avatarUrl: string | null;
+    defaultIndex: number;
+    id: string;
+    items: MessageDTO[];
+    system?: string;
+  };
+
+  function systemText(m: MessageDTO): string {
+    const who = m.author.displayName || m.author.username;
+    const target = m.content.replace(/<@!?\d+>/g, (s) => app.userLabel(s.replace(/[<@!>]/g, "")));
+    switch (m.type) {
+      case 1:
+        return `${who} добавил(а) в группу ${target}`;
+      case 2:
+        return `${who} убрал(а) из группы ${target}`;
+      case 3:
+        return `${who} начал(а) звонок`;
+      case 4:
+        return `${who} изменил(а) название на «${m.content}»`;
+      case 5:
+        return `${who} изменил(а) иконку группы`;
+      case 6:
+        return `${who} закрепил(а) сообщение`;
+      case 7:
+        return `${who} присоединился(лась)`;
+      default:
+        return `${who} изменил(а) что-то`;
+    }
+  }
 
   function groupMessages(msgs: MessageDTO[]): Group[] {
     const out: Group[] = [];
     for (const m of msgs) {
+      if (m.type !== 0) {
+        out.push({
+          authorId: "system",
+          author: "",
+          avatarUrl: null,
+          defaultIndex: 0,
+          id: m.id,
+          items: [m],
+          system: systemText(m),
+        });
+        continue;
+      }
       const last = out[out.length - 1];
-      if (last && last.authorId === m.author.id) {
+      if (last && !last.system && last.authorId === m.author.id) {
         last.items.push(m);
       } else {
         out.push({
@@ -297,6 +340,9 @@
       <p class="mt-8 text-center text-[13px] text-fg-muted">Сообщений пока нет — напиши первым.</p>
     {/if}
     {#each grouped as group (group.id)}
+      {#if group.system}
+        <p class="mt-2 pl-11 text-[12px] text-fg-muted/80 italic select-none">{group.system}</p>
+      {:else}
       <div
         data-message
         role="article"
@@ -407,6 +453,7 @@
           {/each}
         </div>
       </div>
+      {/if}
     {/each}
   </div>
 

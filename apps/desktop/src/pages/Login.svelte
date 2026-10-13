@@ -1,7 +1,6 @@
 <script lang="ts">
   import Button from "../components/ui/Button.svelte";
   import Field from "../components/ui/Field.svelte";
-  import AppBackground from "../components/AppBackground.svelte";
   import { app } from "../lib/app.svelte";
   import type { AuthChallenge } from "../lib/api";
 
@@ -155,7 +154,6 @@
 </script>
 
 <div class="relative grid h-full place-items-center overflow-hidden">
-  <AppBackground />
   <div class="relative z-10 w-full max-w-sm px-4">
     <div class="rounded-2xl border border-line/70 bg-panel/70 p-6 shadow-2xl backdrop-blur-xl">
       <div class="mb-5 flex items-center gap-2.5">
