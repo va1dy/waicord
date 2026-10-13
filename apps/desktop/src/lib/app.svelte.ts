@@ -393,7 +393,10 @@ class AppState {
       return;
     }
     const view = this.viewKey();
-    this.messages = { ...this.messages, [message.channelId]: [...list, message] };
+    this.messages = {
+      ...this.messages,
+      [message.channelId]: [...list, message].sort((a, b) => cmpId(a.id, b.id)),
+    };
     if (message.author.id !== this.me?.id && view !== message.channelId) {
       this.unread = { ...this.unread, [message.channelId]: (this.unread[message.channelId] ?? 0) + 1 };
     }
@@ -519,11 +522,16 @@ class AppState {
 
   private async ensureHistory() {
     const id = this.viewKey();
-    if (!id || this.messages[id]) return;
+    if (!id) return;
     try {
-      const messages = await channelMessages(id, { limit: 50 });
-      for (const m of messages) this.indexUser(m.author);
-      this.messages = { ...this.messages, [id]: messages };
+      const fetched = await channelMessages(id, { limit: 50 });
+      for (const m of fetched) this.indexUser(m.author);
+      const existing = this.messages[id] ?? [];
+      const seen = new Set(fetched.map((m) => m.id));
+      const merged = [...fetched, ...existing.filter((m) => !seen.has(m.id))].sort((a, b) =>
+        cmpId(a.id, b.id),
+      );
+      this.messages = { ...this.messages, [id]: merged };
     } catch (error) {
       this.error = error instanceof Error ? error.message : "Не удалось загрузить историю";
     }
@@ -547,6 +555,16 @@ function snow(id: string | null): number {
     return Number(BigInt(id) / 1000000000000n);
   } catch {
     return 0;
+  }
+}
+
+function cmpId(a: string, b: string): number {
+  try {
+    const x = BigInt(a);
+    const y = BigInt(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  } catch {
+    return a < b ? -1 : a > b ? 1 : 0;
   }
 }
 
