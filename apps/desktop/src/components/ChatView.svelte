@@ -91,6 +91,54 @@
     return new Date(t).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   }
 
+  type Seg =
+    | { kind: "text"; text: string }
+    | { kind: "mention"; id: string }
+    | { kind: "link"; url: string }
+    | { kind: "image"; url: string };
+
+  function isImageUrl(url: string): boolean {
+    const clean = url.split(/[?#]/)[0] ?? url;
+    if (/\.(gif|png|jpe?g|webp|avif)$/i.test(clean)) return true;
+    try {
+      const host = new URL(url).hostname;
+      return (
+        host.endsWith("giphy.com") ||
+        host === "media.discordapp.net" ||
+        host === "cdn.discordapp.com" ||
+        host === "i.imgur.com"
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function parseContent(content: string): Seg[] {
+    const segs: Seg[] = [];
+    const re = /<@!?(\d+)>|https?:\/\/[^\s<]+/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      if (m.index > last) segs.push({ kind: "text", text: content.slice(last, m.index) });
+      if (m[1]) {
+        segs.push({ kind: "mention", id: m[1] });
+      } else {
+        const url = m[0];
+        segs.push(isImageUrl(url) ? { kind: "image", url } : { kind: "link", url });
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < content.length) segs.push({ kind: "text", text: content.slice(last) });
+    return segs;
+  }
+
+  function convertMentions(text: string): string {
+    return text.replace(/@([\w.\u00C0-\u024F-]+)/g, (full, name: string) => {
+      const u = app.findUserByName(name);
+      return u ? `<@${u.id}>` : full;
+    });
+  }
+
   type Group = { authorId: string; author: string; avatarUrl: string | null; defaultIndex: number; id: string; items: MessageDTO[] };
 
   function groupMessages(msgs: MessageDTO[]): Group[] {
@@ -174,7 +222,7 @@
     sending = true;
     sendError = "";
     try {
-      await app.sendMessage(text);
+      await app.sendMessage(convertMentions(text));
       resetComposer();
       focusInput();
     } catch (error) {
@@ -254,7 +302,29 @@
               {/if}
             {/each}
             {#if item.content}
-              <p class="text-[14px] leading-relaxed break-words whitespace-pre-wrap text-fg/95">{item.content}</p>
+              {@const segs = parseContent(item.content)}
+              <p class="text-[14px] leading-relaxed break-words whitespace-pre-wrap text-fg/95">
+                {#each segs as seg, si (item.id + "-s" + si)}
+                  {#if seg.kind === "text"}{seg.text}{:else if seg.kind === "mention"}<span
+                        class="rounded-[3px] bg-accent/20 px-1 font-medium text-accent"
+                        >{app.userLabel(seg.id)}</span
+                      >{:else if seg.kind === "link"}<a
+                        href={seg.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-accent hover:underline"
+                        >{seg.url}</a
+                      >{/if}
+                {/each}
+              </p>
+              {#each segs.filter((s) => s.kind === "image") as img, ii (item.id + "-img" + ii)}
+                <img
+                  src={img.kind === "image" ? img.url : ""}
+                  alt="изображение"
+                  loading="lazy"
+                  class="mt-1 max-h-80 rounded-lg border border-line/50 object-contain"
+                />
+              {/each}
             {/if}
           {/each}
         </div>

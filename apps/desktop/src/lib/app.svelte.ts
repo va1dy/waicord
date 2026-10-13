@@ -33,6 +33,7 @@ export interface RelationshipEntry {
   displayName: string;
   avatarUrl: string | null;
   defaultAvatarIndex: number;
+  bot?: boolean;
 }
 
 class AppState {
@@ -50,11 +51,13 @@ class AppState {
   friends = $state<RelationshipEntry[]>([]);
   incoming = $state<RelationshipEntry[]>([]);
   outgoing = $state<RelationshipEntry[]>([]);
+  users = $state<Record<string, RelationshipEntry>>({});
   active = $state<ActiveView>({ kind: "friends" });
   wsOpen = $state(false);
   gatewayStatus = $state("idle");
 
   private ws: WebSocket | null = null;
+  private guildsLoaded = false;
 
   constructor() {
     void this.boot();
@@ -67,12 +70,29 @@ class AppState {
       const state = await fetchState();
       this.me = state.me;
       this.chats = state.chats;
+      this.sortChats();
+      this.indexChats();
       this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
-      if (this.me) await this.loadGuilds();
+      if (this.me) {
+        this.indexUser(this.me);
+        await this.loadGuilds();
+      }
     } catch (error) {
       this.bootError = error instanceof Error ? error.message : "Мост недоступен";
     } finally {
       this.ready = true;
+    }
+  }
+
+  private async refreshChats() {
+    try {
+      const state = await fetchState();
+      this.me = state.me;
+      this.chats = state.chats;
+      this.sortChats();
+      this.indexChats();
+    } catch {
+      /* keep old data */
     }
   }
 
@@ -101,8 +121,10 @@ class AppState {
     const t = frame.t;
     const d = frame.d as Record<string, any>;
 
+    if (t === "DSMOD_HELLO" || t === "DSMOD_PONG") return;
     if (t === "DSMOD_GATEWAY") {
       this.gatewayStatus = String(d.status ?? "idle");
+      if (d.status === "ready") void this.refreshChats();
       return;
     }
     if (t === "DSMOD_AUTH") {
@@ -113,18 +135,24 @@ class AppState {
         this.friends = [];
         this.incoming = [];
         this.outgoing = [];
+        this.users = {};
       } else {
         void this.boot();
       }
       return;
     }
-    if (!this.me) return;
 
     if (t === "READY") {
       this.applyRelationships(d.relationships);
       if (Array.isArray(d.presences)) {
         for (const p of d.presences) {
           if (p?.user?.id && p.status) this.presence = { ...this.presence, [p.user.id]: p.status };
+        }
+      }
+      if (Array.isArray(d.users)) {
+        for (const u of d.users) {
+          const norm = normalizeUser(u);
+          if (norm) this.indexUser(norm);
         }
       }
       return;
@@ -138,6 +166,8 @@ class AppState {
       if (id && d.status) this.presence = { ...this.presence, [id]: d.status };
       return;
     }
+    if (!this.me) return;
+
     if (t === "TYPING_START") {
       const channelId = d.channel_id as string | undefined;
       const userId = d.user_id as string | undefined;
@@ -149,8 +179,12 @@ class AppState {
       return;
     }
     if (t === "CHANNEL_CREATE" || t === "CHANNEL_UPDATE") {
-      const chat = d as unknown as ChatDTO;
-      if (chat?.id && chat.kind) this.upsertChat(chat);
+      const chat = normalizeChannel(d);
+      if (chat) {
+        this.indexChat(chat);
+        if (chat.kind === "dm" || chat.kind === "group") this.upsertChat(chat);
+        else if (chat.guildId) this.upsertGuildChannel(chat);
+      }
       return;
     }
     if (t === "CHANNEL_DELETE") {
@@ -158,8 +192,9 @@ class AppState {
       return;
     }
     if (t === "MESSAGE_CREATE" || t === "MESSAGE_UPDATE") {
-      const message = d as unknown as MessageDTO;
-      if (message?.id && message.channelId) {
+      const message = normalizeMessage(d);
+      if (message) {
+        this.indexUser(message.author);
         this.pushMessage(message);
         this.touchChat(message);
       }
@@ -176,8 +211,44 @@ class AppState {
   }
 
   private typingName(chat: ChatDTO | undefined, userId: string): string {
-    const r = chat?.recipients?.find((u) => u.id === userId);
+    const r = chat?.recipients?.find((u) => u.id === userId) ?? this.users[userId];
     return r?.displayName || r?.username || "кто-то";
+  }
+
+  private indexUser(u: UserDTO | RelationshipEntry) {
+    this.users = {
+      ...this.users,
+      [u.id]: {
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName || u.username,
+        avatarUrl: u.avatarUrl,
+        defaultAvatarIndex: u.defaultAvatarIndex,
+      },
+    };
+  }
+
+  private indexChat(chat: ChatDTO) {
+    for (const u of chat.recipients ?? []) this.indexUser(u);
+  }
+
+  private indexChats() {
+    for (const c of this.chats) this.indexChat(c);
+  }
+
+  findUserByName(name: string): RelationshipEntry | undefined {
+    const q = name.toLowerCase().replace(/^@/, "");
+    const pools = [this.friends, this.incoming, this.outgoing, Object.values(this.users)];
+    for (const pool of pools) {
+      const hit = pool.find((u) => u.username.toLowerCase() === q || u.displayName.toLowerCase() === q);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  userLabel(id: string): string {
+    const u = this.users[id] ?? this.friends.find((f) => f.id === id);
+    return u ? `@${u.displayName || u.username}` : `@${id}`;
   }
 
   private applyRelationships(raw: unknown) {
@@ -188,6 +259,7 @@ class AppState {
     for (const rel of raw) {
       const entry = relToEntry(rel);
       if (!entry) continue;
+      this.indexUser(entry);
       if (rel.type === 1) friends.push(entry);
       else if (rel.type === 3) incoming.push(entry);
       else if (rel.type === 4) outgoing.push(entry);
@@ -202,6 +274,7 @@ class AppState {
     if (rel.type === 1 || rel.type === 3 || rel.type === 4) {
       const entry = relToEntry(rel);
       if (!entry) return;
+      this.indexUser(entry);
       if (rel.type === 1) {
         this.friends = [...this.friends.filter((f) => f.id !== entry.id), entry].sort((a, b) =>
           a.username.localeCompare(b.username),
@@ -224,15 +297,24 @@ class AppState {
     try {
       const guilds = await listGuilds();
       this.guilds = guilds;
-      const entries = await Promise.all(
-        guilds.map(async (g) => {
+      const entries: Record<string, ChatDTO[]> = {};
+      for (const g of guilds) {
+        try {
           const channels = await guildChannels(g.id);
-          return [g.id, channels.filter((c) => c.type === 0 || c.type === 5)] as const;
-        }),
-      );
-      this.guildChannels = Object.fromEntries(entries);
+          entries[g.id] = channels.filter((c) => c.type === 0 || c.type === 5);
+          for (const c of entries[g.id]!) this.indexChat(c);
+        } catch {
+          entries[g.id] = [];
+        }
+        await sleep(450);
+      }
+      this.guildChannels = entries;
+      this.guildsLoaded = true;
+      this.error = "";
     } catch (error) {
-      this.error = error instanceof Error ? error.message : "Не удалось загрузить сервера";
+      if (!this.guildsLoaded) {
+        this.error = error instanceof Error ? error.message : "Не удалось загрузить сервера";
+      }
     }
   }
 
@@ -240,6 +322,17 @@ class AppState {
     const exists = this.chats.some((c) => c.id === chat.id);
     this.chats = exists ? this.chats.map((c) => (c.id === chat.id ? chat : c)) : [chat, ...this.chats];
     this.sortChats();
+  }
+
+  private upsertGuildChannel(chat: ChatDTO) {
+    const gid = chat.guildId;
+    if (!gid) return;
+    const list = this.guildChannels[gid] ?? [];
+    const exists = list.some((c) => c.id === chat.id);
+    this.guildChannels = {
+      ...this.guildChannels,
+      [gid]: exists ? list.map((c) => (c.id === chat.id ? chat : c)) : [...list, chat],
+    };
   }
 
   private sortChats() {
@@ -271,10 +364,16 @@ class AppState {
 
   private touchChat(message: MessageDTO) {
     const chat = this.chatById(message.channelId);
-    if (chat) {
+    if (chat?.guildId) {
+      const list = this.guildChannels[chat.guildId] ?? [];
+      this.guildChannels = {
+        ...this.guildChannels,
+        [chat.guildId]: list.map((c) => (c.id === chat.id ? { ...c, lastMessageId: message.id } : c)),
+      };
+    } else if (chat) {
       this.upsertChat({ ...chat, lastMessageId: message.id });
     } else {
-      void this.boot();
+      void this.refreshChats();
     }
   }
 
@@ -365,6 +464,8 @@ class AppState {
     this.friends = [];
     this.incoming = [];
     this.outgoing = [];
+    this.users = {};
+    this.guildsLoaded = false;
     this.active = { kind: "friends" };
     this.gatewayStatus = "idle";
   }
@@ -384,6 +485,7 @@ class AppState {
     if (!id || this.messages[id]) return;
     try {
       const messages = await channelMessages(id, { limit: 50 });
+      for (const m of messages) this.indexUser(m.author);
       this.messages = { ...this.messages, [id]: messages };
     } catch (error) {
       this.error = error instanceof Error ? error.message : "Не удалось загрузить историю";
@@ -398,6 +500,10 @@ class AppState {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function snow(id: string | null): number {
   if (!id) return 0;
   try {
@@ -407,17 +513,90 @@ function snow(id: string | null): number {
   }
 }
 
-function relToEntry(rel: unknown): RelationshipEntry | null {
-  const r = rel as { user?: Record<string, unknown> };
-  const u = r?.user;
-  if (!u?.id) return null;
+function defaultIndex(id: string): number {
+  try {
+    return Number(BigInt(id) % 6n);
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeUser(raw: any): (RelationshipEntry & { bot: boolean }) | null {
+  if (!raw?.id) return null;
+  const id = String(raw.id);
   return {
-    id: String(u.id),
-    username: String(u.username ?? ""),
-    displayName: String(u.global_name ?? u.username ?? ""),
-    avatarUrl: u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png` : null,
-    defaultAvatarIndex: Number(u.id ? Number(BigInt(String(u.id)) % 6n) : 0),
+    id,
+    username: String(raw.username ?? ""),
+    displayName: String(raw.global_name ?? raw.globalName ?? raw.username ?? ""),
+    avatarUrl: raw.avatar
+      ? `https://cdn.discordapp.com/avatars/${id}/${raw.avatar}.png?size=64`
+      : null,
+    defaultAvatarIndex: defaultIndex(id),
+    bot: Boolean(raw.bot),
   };
+}
+
+function normalizeMessage(raw: any): MessageDTO | null {
+  if (!raw?.id || !raw?.author?.id) return null;
+  const author = normalizeUser(raw.author);
+  if (!author) return null;
+  const attachments = Array.isArray(raw.attachments)
+    ? raw.attachments.map((a: any, i: number) => ({
+        id: String(a.id ?? i),
+        filename: String(a.filename ?? "file"),
+        url: String(a.url ?? ""),
+        proxyUrl: String(a.proxy_url ?? a.proxyUrl ?? a.url ?? ""),
+        width: a.width ?? null,
+        height: a.height ?? null,
+        size: a.size,
+        contentType: a.content_type ?? a.contentType ?? null,
+      }))
+    : [];
+  const embeds = Array.isArray(raw.embeds) ? raw.embeds : [];
+  const mentions = Array.isArray(raw.mentions)
+    ? raw.mentions.map((u: any) => String(u?.id ?? "")).filter(Boolean)
+    : [];
+  return {
+    id: String(raw.id),
+    channelId: String(raw.channel_id ?? raw.channelId ?? ""),
+    author,
+    content: String(raw.content ?? ""),
+    timestamp: String(raw.timestamp ?? new Date().toISOString()),
+    editedTimestamp: raw.edited_timestamp ?? raw.editedTimestamp ?? null,
+    attachments,
+    embeds,
+    mentions,
+    pinned: Boolean(raw.pinned),
+    type: Number(raw.type ?? 0),
+    referenceMessageId: raw.message_reference?.message_id ?? raw.referenceMessageId ?? null,
+  };
+}
+
+function normalizeChannel(raw: any): ChatDTO | null {
+  if (!raw?.id) return null;
+  const type = Number(raw.type ?? 0);
+  const kind: ChatDTO["kind"] = type === 1 ? "dm" : type === 3 ? "group" : "guild";
+  const recipients = Array.isArray(raw.recipients)
+    ? (raw.recipients.map((u: any) => normalizeUser(u)).filter(Boolean) as RelationshipEntry[]).map(
+        (u) => u as unknown as UserDTO,
+      )
+    : [];
+  return {
+    id: String(raw.id),
+    kind,
+    name: String(raw.name ?? ""),
+    avatarUrl: raw.icon ? `https://cdn.discordapp.com/icons/${raw.id}/${raw.icon}.png?size=64` : null,
+    recipients,
+    guildId: raw.guild_id ? String(raw.guild_id) : null,
+    parentId: raw.parent_id ? String(raw.parent_id) : null,
+    lastMessageId: raw.last_message_id ? String(raw.last_message_id) : null,
+    type,
+    raw,
+  };
+}
+
+function relToEntry(rel: unknown): RelationshipEntry | null {
+  return normalizeUser((rel as { user?: Record<string, unknown> })?.user);
 }
 
 export const app = new AppState();
