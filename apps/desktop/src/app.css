@@ -47,6 +47,15 @@ body {
   font-size: 13px;
 }
 
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(232, 236, 244, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(232, 236, 244, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 40%, black 25%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 40%, black 25%, transparent 85%);
+}
+
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;

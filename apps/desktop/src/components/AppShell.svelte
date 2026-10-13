@@ -2,7 +2,7 @@
   import Avatar from "./Avatar.svelte";
   import ChatView from "./ChatView.svelte";
   import FriendsPage from "../pages/FriendsPage.svelte";
-  import GlowCanvas from "./GlowCanvas.svelte";
+  import AppBackground from "./AppBackground.svelte";
   import { app } from "../lib/app.svelte";
   import { avatarOf, type ChatDTO, type UserDTO } from "../lib/api";
 
@@ -31,9 +31,9 @@
 </script>
 
 <div class="relative h-full min-h-0">
-  <GlowCanvas />
+  <AppBackground />
   <div class="relative z-10 flex h-full min-h-0">
-    <aside class="flex w-64 shrink-0 flex-col border-r border-line/60 bg-panel/60 backdrop-blur-md">
+    <aside class="flex w-64 shrink-0 flex-col border-r border-line/60 bg-panel/35 backdrop-blur-md">
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 px-4">
       <img src="/waicord-mark.svg" class="size-4" alt="" aria-hidden="true" />
       <span class="truncate text-[13px] font-semibold">Discord</span>
