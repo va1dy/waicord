@@ -128,7 +128,8 @@
     const start = performance.now();
 
     function resize() {
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+      const low = el!.dataset.lowq === "1";
+      const dpr = low ? 0.25 : Math.min(window.devicePixelRatio || 1, 1.25);
       const w = Math.max(1, Math.round(el!.clientWidth * dpr));
       const h = Math.max(1, Math.round(el!.clientHeight * dpr));
       if (el!.width !== w || el!.height !== h) {
@@ -159,6 +160,29 @@
       targetY = e.clientY;
     }
 
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    let resizing = false;
+
+    function setQuality(low: boolean) {
+      el!.dataset.lowq = low ? "1" : "0";
+    }
+
+    function onResize() {
+      if (!resizing) {
+        resizing = true;
+        setQuality(true);
+      }
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizing = false;
+        setQuality(false);
+        resize();
+        draw((performance.now() - start) / 1000);
+      }, 140);
+    }
+
+    window.addEventListener("resize", onResize, { passive: true });
+
     if (reduced) {
       draw(0);
     } else {
@@ -167,6 +191,8 @@
     }
 
     return () => {
+      clearTimeout(resizeTimer);
+      window.removeEventListener("resize", onResize);
       cancelAnimationFrame(raf);
       window.removeEventListener("pointermove", onMove);
       gl.deleteBuffer(buffer);

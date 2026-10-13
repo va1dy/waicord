@@ -20,7 +20,9 @@
         "minHeight": 620,
         "center": true,
         "decorations": false,
-        "shadow": true
+        "shadow": false,
+        "backgroundColor": "#0a0d12",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,MediaRouter,OptimizationHints,InterestFeedContentSuggestions,AudioServiceOutOfProcess,BackForwardCache,AutofillServerCommunication --disable-background-networking --disable-component-update --disable-domain-reliability --no-pings --no-first-run --disable-client-side-phishing-detection --safebrowsing-disable-auto-update --metrics-recording-only --disable-sync"
       }
     ],
     "security": {
@@ -28,6 +30,7 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["nsis"]
   }
 }
