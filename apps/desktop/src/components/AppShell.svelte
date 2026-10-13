@@ -2,7 +2,6 @@
   import Avatar from "./Avatar.svelte";
   import ChatView from "./ChatView.svelte";
   import FriendsPage from "../pages/FriendsPage.svelte";
-  import GlowCanvas from "./GlowCanvas.svelte";
   import { app } from "../lib/app.svelte";
   import { avatarOf, type ChatDTO, type UserDTO } from "../lib/api";
 
@@ -30,10 +29,8 @@
   }
 </script>
 
-<div class="relative h-full min-h-0">
-  <GlowCanvas />
-  <div class="relative z-10 flex h-full min-h-0">
-    <aside class="flex w-64 shrink-0 flex-col border-r border-line/60 bg-panel/60 backdrop-blur-md">
+<div class="flex h-full min-h-0">
+  <aside class="flex w-64 shrink-0 flex-col border-r border-line/60 bg-panel/35 backdrop-blur-md">
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 px-4">
       <img src="/waicord-mark.svg" class="size-4" alt="" aria-hidden="true" />
       <span class="truncate text-[13px] font-semibold">Discord</span>
@@ -84,7 +81,17 @@
               : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
           >
             {#if chat.kind === "group"}
-              <span class="grid size-[30px] shrink-0 place-items-center rounded-full bg-panel-soft text-[13px]" aria-hidden="true">👥</span>
+              <span class="flex shrink-0 items-center" aria-hidden="true">
+                {#each chat.recipients.slice(0, 3) as u, i (u.id)}
+                  <span class="{i > 0 ? '-ml-2.5' : ''} rounded-full ring-2 ring-panel/80">
+                    <Avatar username={u.username} url={avatarOf(u)} defaultIndex={u.defaultAvatarIndex} size={20} />
+                  </span>
+                {/each}
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate">{dmTitle(chat)}</span>
+                <span class="block truncate text-[11px] text-fg-muted/80">{chat.recipients.length + 1} участников</span>
+              </span>
             {:else}
               <span class="relative shrink-0">
                 <Avatar username={peer?.username ?? "?"} url={avatarOf(peer)} defaultIndex={peer?.defaultAvatarIndex} size={30} />
@@ -92,8 +99,8 @@
                   <span class="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-panel bg-emerald-400"></span>
                 {/if}
               </span>
+              <span class="min-w-0 flex-1 truncate">{dmTitle(chat)}</span>
             {/if}
-            <span class="truncate">{dmTitle(chat)}</span>
             {#if (app.unread[chat.id] ?? 0) > 0 && !chatActive(chat.id)}
               <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
                 {app.unread[chat.id]}
@@ -176,5 +183,4 @@
       <ChatView />
     {/if}
   </main>
-  </div>
 </div>

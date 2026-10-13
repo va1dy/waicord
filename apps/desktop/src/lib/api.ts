@@ -123,7 +123,7 @@ async function request<T>(path: string, init?: { method?: string; body?: unknown
       body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
   } catch {
-    throw new Error("Мост dsmod не запущен — запусти `bun start` в apps/dsmod");
+    throw new Error("Мост dsmod не отвечает");
   }
   const payload = (await res.json().catch(() => null)) as
     | { ok: true; data: T }

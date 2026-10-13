@@ -47,6 +47,15 @@ body {
   font-size: 13px;
 }
 
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(232, 236, 244, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(232, 236, 244, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 40%, black 25%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 40%, black 25%, transparent 85%);
+}
+
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
@@ -71,6 +80,25 @@ input:-webkit-autofill {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+.spoiler {
+  background: var(--color-panel-soft);
+  border-radius: 4px;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: filter 0.15s, background 0.15s;
+  filter: blur(5px);
+}
+
+.spoiler:hover {
+  background: var(--color-line);
+}
+
+.spoiler.open {
+  background: transparent;
+  filter: none;
+  cursor: text;
 }
 
 @media (prefers-reduced-motion: reduce) {

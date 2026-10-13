@@ -75,22 +75,28 @@ class AppState {
 
     const run = (async () => {
       this.bootError = "";
-      try {
-        const state = await fetchState();
-        this.me = state.me;
-        this.chats = state.chats;
-        this.sortChats();
-        this.indexChats();
-        this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
-        if (this.me) {
-          this.indexUser(this.me);
-          await this.loadGuilds();
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const state = await fetchState();
+          this.me = state.me;
+          this.chats = state.chats;
+          this.sortChats();
+          this.indexChats();
+          this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
+          if (this.me) {
+            this.indexUser(this.me);
+            await this.loadGuilds();
+          }
+          this.ready = true;
+          return;
+        } catch (error) {
+          lastError = error;
+          await sleep(500);
         }
-      } catch (error) {
-        this.bootError = error instanceof Error ? error.message : "Мост недоступен";
-      } finally {
-        this.ready = true;
       }
+      this.bootError = lastError instanceof Error ? lastError.message : "Мост недоступен";
+      this.ready = true;
     })();
 
     this.booting = run.finally(() => {
@@ -393,7 +399,10 @@ class AppState {
       return;
     }
     const view = this.viewKey();
-    this.messages = { ...this.messages, [message.channelId]: [...list, message] };
+    this.messages = {
+      ...this.messages,
+      [message.channelId]: [...list, message].sort((a, b) => cmpId(a.id, b.id)),
+    };
     if (message.author.id !== this.me?.id && view !== message.channelId) {
       this.unread = { ...this.unread, [message.channelId]: (this.unread[message.channelId] ?? 0) + 1 };
     }
@@ -519,11 +528,16 @@ class AppState {
 
   private async ensureHistory() {
     const id = this.viewKey();
-    if (!id || this.messages[id]) return;
+    if (!id) return;
     try {
-      const messages = await channelMessages(id, { limit: 50 });
-      for (const m of messages) this.indexUser(m.author);
-      this.messages = { ...this.messages, [id]: messages };
+      const fetched = await channelMessages(id, { limit: 50 });
+      for (const m of fetched) this.indexUser(m.author);
+      const existing = this.messages[id] ?? [];
+      const seen = new Set(fetched.map((m) => m.id));
+      const merged = [...fetched, ...existing.filter((m) => !seen.has(m.id))].sort((a, b) =>
+        cmpId(a.id, b.id),
+      );
+      this.messages = { ...this.messages, [id]: merged };
     } catch (error) {
       this.error = error instanceof Error ? error.message : "Не удалось загрузить историю";
     }
@@ -547,6 +561,16 @@ function snow(id: string | null): number {
     return Number(BigInt(id) / 1000000000000n);
   } catch {
     return 0;
+  }
+}
+
+function cmpId(a: string, b: string): number {
+  try {
+    const x = BigInt(a);
+    const y = BigInt(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  } catch {
+    return a < b ? -1 : a > b ? 1 : 0;
   }
 }
 

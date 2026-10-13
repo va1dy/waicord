@@ -18,7 +18,7 @@
     const c = chat;
     if (!c) return { icon: "", label: "чат" };
     if (c.kind === "guild") return { icon: "#", label: c.name || "канал" };
-    if (c.kind === "group") return { icon: "👥", label: c.name || "Группа" };
+    if (c.kind === "group") return { icon: "", label: c.name || "Группа" };
     const other = c.recipients.find((u) => u.id !== app.me?.id) ?? c.recipients[0];
     return { icon: "@", label: other?.displayName || other?.username || "чат" };
   });
@@ -90,14 +90,27 @@
   function formatTime(iso: string): string {
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) return "";
-    return new Date(t).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    const d = new Date(t);
+    const now = new Date();
+    const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    const sameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    const yest = new Date(now);
+    yest.setDate(now.getDate() - 1);
+    if (sameDay(d, now)) return `Сегодня, ${time}`;
+    if (sameDay(d, yest)) return `Вчера, ${time}`;
+    if (d.getFullYear() === now.getFullYear())
+      return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}, ${time}`;
+    return `${d.toLocaleDateString("ru-RU")}, ${time}`;
   }
 
   type Seg =
     | { kind: "text"; text: string }
     | { kind: "mention"; id: string }
     | { kind: "link"; url: string }
-    | { kind: "image"; url: string };
+    | { kind: "image"; url: string }
+    | { kind: "code"; text: string; block?: boolean }
+    | { kind: "fmt"; fmt: "b" | "i" | "u" | "s" | "sp"; children: Seg[] };
 
   const IMAGE_HOSTS = [
     "giphy.com",
@@ -131,22 +144,63 @@
   }
 
   function parseContent(content: string): Seg[] {
-    const segs: Seg[] = [];
-    const re = /<@!?(\d+)>|https?:\/\/[^\s<]+/g;
+    const out: Seg[] = [];
+    const cbRe = /```(?:\w+)?\n?([\s\S]*?)```/g;
     let last = 0;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
-      if (m.index > last) segs.push({ kind: "text", text: content.slice(last, m.index) });
-      if (m[1]) {
-        segs.push({ kind: "mention", id: m[1] });
-      } else {
-        const url = m[0];
+    while ((m = cbRe.exec(content)) !== null) {
+      if (m.index > last) out.push(...parseInline(content.slice(last, m.index)));
+      out.push({ kind: "code", text: (m[1] ?? "").replace(/\n$/, ""), block: true });
+      last = m.index + m[0].length;
+    }
+    if (last < content.length) out.push(...parseInline(content.slice(last)));
+    return out;
+  }
+
+  function parseInline(text: string): Seg[] {
+    const segs: Seg[] = [];
+    const icRe = /`([^`\n]+)`/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = icRe.exec(text)) !== null) {
+      if (m.index > last) segs.push(...parseFmt(text.slice(last, m.index)));
+      segs.push({ kind: "code", text: m[1] ?? "" });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) segs.push(...parseFmt(text.slice(last)));
+    return segs;
+  }
+
+  function parseFmt(text: string): Seg[] {
+    const segs: Seg[] = [];
+    const re =
+      /(\*\*|__|~~|\|\|)(.+?)\1|(?<![\w*])\*([^*\n]+)\*(?![\w*])|(?<![\w_])_([^_\n]+)_(?![\w_])|<@!?(\d+)>|(https?:\/\/[^\s<]+)/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) segs.push({ kind: "text", text: text.slice(last, m.index) });
+      if (m[2] !== undefined) {
+        const marker = m[1] ?? "";
+        const fmt = marker === "**" ? "b" : marker === "__" ? "u" : marker === "~~" ? "s" : "sp";
+        segs.push({ kind: "fmt", fmt, children: parseFmt(m[2]) });
+      } else if (m[3] !== undefined) {
+        segs.push({ kind: "fmt", fmt: "i", children: parseFmt(m[3]) });
+      } else if (m[4] !== undefined) {
+        segs.push({ kind: "fmt", fmt: "i", children: parseFmt(m[4]) });
+      } else if (m[5] !== undefined) {
+        segs.push({ kind: "mention", id: m[5] });
+      } else if (m[6] !== undefined) {
+        const url = m[6];
         segs.push(isImageUrl(url) ? { kind: "image", url } : { kind: "link", url });
       }
       last = m.index + m[0].length;
     }
-    if (last < content.length) segs.push({ kind: "text", text: content.slice(last) });
+    if (last < text.length) segs.push({ kind: "text", text: text.slice(last) });
     return segs;
+  }
+
+  function onSpoiler(e: MouseEvent | KeyboardEvent) {
+    (e.currentTarget as HTMLElement).classList.toggle("open");
   }
 
   function convertMentions(text: string): string {
@@ -156,13 +210,56 @@
     });
   }
 
-  type Group = { authorId: string; author: string; avatarUrl: string | null; defaultIndex: number; id: string; items: MessageDTO[] };
+  type Group = {
+    authorId: string;
+    author: string;
+    avatarUrl: string | null;
+    defaultIndex: number;
+    id: string;
+    items: MessageDTO[];
+    system?: string;
+  };
+
+  function systemText(m: MessageDTO): string {
+    const who = m.author.displayName || m.author.username;
+    const target = m.content.replace(/<@!?\d+>/g, (s) => app.userLabel(s.replace(/[<@!>]/g, "")));
+    switch (m.type) {
+      case 1:
+        return `${who} добавил(а) в группу ${target}`;
+      case 2:
+        return `${who} убрал(а) из группы ${target}`;
+      case 3:
+        return `${who} начал(а) звонок`;
+      case 4:
+        return `${who} изменил(а) название на «${m.content}»`;
+      case 5:
+        return `${who} изменил(а) иконку группы`;
+      case 6:
+        return `${who} закрепил(а) сообщение`;
+      case 7:
+        return `${who} присоединился(лась)`;
+      default:
+        return `${who} изменил(а) что-то`;
+    }
+  }
 
   function groupMessages(msgs: MessageDTO[]): Group[] {
     const out: Group[] = [];
     for (const m of msgs) {
+      if (m.type !== 0) {
+        out.push({
+          authorId: "system",
+          author: "",
+          avatarUrl: null,
+          defaultIndex: 0,
+          id: m.id,
+          items: [m],
+          system: systemText(m),
+        });
+        continue;
+      }
       const last = out[out.length - 1];
-      if (last && last.authorId === m.author.id) {
+      if (last && !last.system && last.authorId === m.author.id) {
         last.items.push(m);
       } else {
         out.push({
@@ -274,8 +371,22 @@
 
 <div class="flex h-full min-h-0 flex-col">
   <header class="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 px-4">
-    <span class="text-fg-muted" aria-hidden="true">{title.icon}</span>
-    <h1 class="truncate text-[14px] font-semibold">{title.label}</h1>
+    {#if chat?.kind === "group"}
+      <span class="flex shrink-0 items-center" aria-hidden="true">
+        {#each chat.recipients.slice(0, 3) as u, i (u.id)}
+          <span class="{i > 0 ? '-ml-2.5' : ''} rounded-full ring-2 ring-ink">
+            <Avatar username={u.username} url={avatarOf(u)} defaultIndex={u.defaultAvatarIndex} size={20} />
+          </span>
+        {/each}
+      </span>
+      <h1 class="truncate text-[14px] font-semibold">{title.label}</h1>
+      <span class="shrink-0 text-[12px] text-fg-muted">{chat.recipients.length + 1} участников</span>
+    {:else}
+      {#if title.icon}
+        <span class="text-fg-muted" aria-hidden="true">{title.icon}</span>
+      {/if}
+      <h1 class="truncate text-[14px] font-semibold">{title.label}</h1>
+    {/if}
     {#if chat?.kind === "dm"}
       {@const other = chat.recipients.find((u) => u.id !== app.me?.id) ?? chat.recipients[0]}
       {#if other}
@@ -293,10 +404,45 @@
   </header>
 
   <div bind:this={listEl} class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+    {#snippet segInline(seg: Seg)}
+      {#if seg.kind === "text"}<span class="whitespace-pre-wrap">{seg.text}</span>
+      {:else if seg.kind === "mention"}<span
+          class="rounded-[3px] bg-accent/20 px-1 font-medium text-accent">{app.userLabel(seg.id)}</span
+        >
+      {:else if seg.kind === "link"}<a
+          href={seg.url}
+          target="_blank"
+          rel="noreferrer"
+          class="break-all text-accent hover:underline">{seg.url}</a
+        >
+      {:else if seg.kind === "code"}<code
+          class="rounded-[3px] bg-panel-soft/80 px-1 font-mono text-[13px]">{seg.text}</code
+        >
+      {:else if seg.kind === "fmt"}
+        {#if seg.fmt === "b"}<strong>{#each seg.children as c, ci (ci)}{@render segInline(c)}{/each}</strong>
+        {:else if seg.fmt === "i"}<em>{#each seg.children as c, ci (ci)}{@render segInline(c)}{/each}</em>
+        {:else if seg.fmt === "u"}<u>{#each seg.children as c, ci (ci)}{@render segInline(c)}{/each}</u>
+        {:else if seg.fmt === "s"}<s>{#each seg.children as c, ci (ci)}{@render segInline(c)}{/each}</s>
+        {:else if seg.fmt === "sp"}<span
+            class="spoiler"
+            role="button"
+            tabindex="0"
+            onclick={onSpoiler}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") onSpoiler(e);
+            }}
+            >{#each seg.children as c, ci (ci)}{@render segInline(c)}{/each}</span
+          >
+        {/if}
+      {/if}
+    {/snippet}
     {#if messages.length === 0}
       <p class="mt-8 text-center text-[13px] text-fg-muted">Сообщений пока нет — напиши первым.</p>
     {/if}
     {#each grouped as group (group.id)}
+      {#if group.system}
+        <p class="mt-2 pl-11 text-[12px] text-fg-muted/80 italic select-none">{group.system}</p>
+      {:else}
       <div
         data-message
         role="article"
@@ -307,7 +453,11 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline gap-2">
             <span class="text-[13px] font-semibold">{group.author}</span>
-            <span class="text-[11px] text-fg-muted/70">{formatTime(group.items[0]?.timestamp ?? "")}</span>
+            <span class="text-[11px] text-fg-muted/70"
+              >{formatTime(group.items[0]?.timestamp ?? "")}{#if group.items.some((m) => m.editedTimestamp)}
+                <span class="text-fg-muted/50"> (изменено)</span>
+              {/if}</span
+            >
           </div>
           {#each group.items as item (item.id)}
             {#if item.attachments?.length}
@@ -369,20 +519,18 @@
             {/each}
             {#if item.content}
               {@const segs = parseContent(item.content)}
-              <p class="text-[14px] leading-relaxed break-words whitespace-pre-wrap text-fg/95">
-                {#each segs as seg, si (item.id + "-s" + si)}
-                  {#if seg.kind === "text"}{seg.text}{:else if seg.kind === "mention"}<span
-                        class="rounded-[3px] bg-accent/20 px-1 font-medium text-accent"
-                        >{app.userLabel(seg.id)}</span
-                      >{:else if seg.kind === "link"}<a
-                        href={seg.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        class="text-accent hover:underline"
-                        >{seg.url}</a
-                      >{/if}
-                {/each}
-              </p>
+              {@const flow = segs.filter((s) => !(s.kind === "code" && s.block))}
+              {#if flow.length > 0}
+                <p class="text-[14px] leading-relaxed break-words text-fg/95">
+                  {#each flow as seg, si (item.id + "-s" + si)}{@render segInline(seg)}{/each}
+                </p>
+              {/if}
+              {#each segs.filter((s) => s.kind === "code" && s.block) as seg, si (item.id + "-cb" + si)}
+                <pre
+                  class="mt-1 max-w-full overflow-x-auto rounded-lg border border-line/50 bg-panel-soft px-3 py-2 font-mono text-[13px] text-fg/90"
+                  >{#if seg.kind === "code"}{seg.text}{/if}</pre
+                >
+              {/each}
               {#each segs.filter((s) => s.kind === "image") as img, ii (item.id + "-img" + ii)}
                 <span class="mt-1 inline-block">
                   <img
@@ -407,6 +555,7 @@
           {/each}
         </div>
       </div>
+      {/if}
     {/each}
   </div>
 
