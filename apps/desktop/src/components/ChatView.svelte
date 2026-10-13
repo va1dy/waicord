@@ -18,7 +18,7 @@
     const c = chat;
     if (!c) return { icon: "", label: "чат" };
     if (c.kind === "guild") return { icon: "#", label: c.name || "канал" };
-    if (c.kind === "group") return { icon: "👥", label: c.name || "Группа" };
+    if (c.kind === "group") return { icon: "", label: c.name || "Группа" };
     const other = c.recipients.find((u) => u.id !== app.me?.id) ?? c.recipients[0];
     return { icon: "@", label: other?.displayName || other?.username || "чат" };
   });
@@ -317,8 +317,22 @@
 
 <div class="flex h-full min-h-0 flex-col">
   <header class="flex h-11 shrink-0 items-center gap-2 border-b border-line/60 px-4">
-    <span class="text-fg-muted" aria-hidden="true">{title.icon}</span>
-    <h1 class="truncate text-[14px] font-semibold">{title.label}</h1>
+    {#if chat?.kind === "group"}
+      <span class="flex shrink-0 items-center" aria-hidden="true">
+        {#each chat.recipients.slice(0, 3) as u, i (u.id)}
+          <span class="{i > 0 ? '-ml-2.5' : ''} rounded-full ring-2 ring-ink">
+            <Avatar username={u.username} url={avatarOf(u)} defaultIndex={u.defaultAvatarIndex} size={20} />
+          </span>
+        {/each}
+      </span>
+      <h1 class="truncate text-[14px] font-semibold">{title.label}</h1>
+      <span class="shrink-0 text-[12px] text-fg-muted">{chat.recipients.length + 1} участников</span>
+    {:else}
+      {#if title.icon}
+        <span class="text-fg-muted" aria-hidden="true">{title.icon}</span>
+      {/if}
+      <h1 class="truncate text-[14px] font-semibold">{title.label}</h1>
+    {/if}
     {#if chat?.kind === "dm"}
       {@const other = chat.recipients.find((u) => u.id !== app.me?.id) ?? chat.recipients[0]}
       {#if other}
