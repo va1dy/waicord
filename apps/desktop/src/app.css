@@ -82,6 +82,25 @@ input:-webkit-autofill {
   }
 }
 
+.spoiler {
+  background: var(--color-panel-soft);
+  border-radius: 4px;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: filter 0.15s, background 0.15s;
+  filter: blur(5px);
+}
+
+.spoiler:hover {
+  background: var(--color-line);
+}
+
+.spoiler.open {
+  background: transparent;
+  filter: none;
+  cursor: text;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
