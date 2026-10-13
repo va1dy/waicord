@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dsmod — demo UI</title>
+    <!--
+      Одностраничный демо-клиент. Работает без сборки: открой файл в браузере
+      (или отдай через Tauri/webview). Ходит только в локальный мост dsmod,
+      токен во фронтенд не попадает.
+
+      Требуется поднятый мост:  bun start   (http://127.0.0.1:8787)
+    -->
+    <style>
+      :root {
+        --bg: #1e1f22;
+        --bg-2: #2b2d31;
+        --bg-3: #313338;
+        --text: #dbdee1;
+        --muted: #949ba4;
+        --accent: #5865f2;
+        --ok: #23a559;
+        --err: #f23f43;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        height: 100vh;
+        background: var(--bg-3);
+        color: var(--text);
+        font: 15px/1.4 "gg sans", "Segoe UI", system-ui, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .screen { display: none; width: 100%; height: 100%; }
+      .screen.active { display: flex; }
+
+      /* --- login --- */
+      #screen-login, #screen-mfa, #screen-qr {
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 16px;
+        background: var(--bg);
+      }
+      .card {
+        width: 380px;
+        background: var(--bg-2);
+        border-radius: 8px;
+        padding: 24px;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+      }
+      .card h1 { margin: 0 0 4px; font-size: 22px; }
+      .card p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+      label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--muted); margin: 12px 0 4px; }
+      input {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        background: #1e1f22;
+        color: var(--text);
+        font-size: 15px;
+      }
+      input:focus { outline: none; border-color: var(--accent); }
+      button {
+        margin-top: 16px;
+        width: 100%;
+        padding: 10px;
+        border: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary { background: #4e5058; }
+      button.link { background: none; color: var(--muted); text-decoration: underline; margin-top: 8px; }
+      .error { color: var(--err); font-size: 13px; min-height: 18px; margin-top: 10px; }
+      .qr-box { text-align: center; }
+      .qr-box img { width: 240px; height: 240px; background: #fff; border-radius: 8px; padding: 8px; }
+      .status { color: var(--muted); font-size: 13px; min-height: 18px; }
+
+      /* --- app --- */
+      #screen-app { flex-direction: row; }
+      aside {
+        width: 320px;
+        background: var(--bg-2);
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 14px 16px;
+        border-bottom: 1px solid #1f2023;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+      header .who { color: var(--muted); font-weight: 400; font-size: 13px; }
+      #chats { overflow-y: auto; flex: 1; }
+      .chat {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+      .chat:hover { background: #35373c; }
+      .chat.active { background: #404249; }
+      .chat img, .avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: #41434a;
+        object-fit: cover;
+        flex: none;
+      }
+      .chat .name { font-size: 15px; }
+      .chat .preview { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+      #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      .message { display: flex; gap: 12px; }
+      .message .body { min-width: 0; }
+      .message .meta { font-size: 13px; }
+      .message .meta b { font-size: 15px; }
+      .message .meta time { color: var(--muted); margin-left: 6px; font-size: 11px; }
+      .message .text { white-space: pre-wrap; word-break: break-word; }
+      .message img.attachment { max-width: 320px; max-height: 240px; border-radius: 6px; margin-top: 6px; }
+      .empty { color: var(--muted); margin: auto; text-align: center; }
+      form.composer {
+        display: flex;
+        gap: 8px;
+        padding: 12px 16px 20px;
+        background: var(--bg-3);
+      }
+      form.composer input { flex: 1; background: var(--bg-2); }
+      form.composer button { width: auto; margin-top: 0; padding: 10px 18px; }
+      #conn { font-size: 12px; color: var(--muted); margin-left: auto; }
+      #conn.ok { color: var(--ok); }
+    </style>
+  </head>
+  <body>
+    <!-- 1. почта + пароль -->
+    <section id="screen-login" class="screen active">
+      <div class="card">
+        <h1>Вход в Discord</h1>
+        <p>Токен остаётся в локальном мосте, в браузер не уходит.</p>
+        <form id="login-form">
+          <label for="email">Почта</label>
+          <input id="email" type="email" autocomplete="username" required />
+          <label for="password">Пароль</label>
+          <input id="password" type="password" autocomplete="current-password" required />
+          <button type="submit">Войти</button>
+          <button type="button" class="link" id="to-qr">Войти по QR-коду</button>
+          <div class="error" id="login-error"></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2. код MFA -->
+    <section id="screen-mfa" class="screen">
+      <div class="card">
+        <h1>Двухфакторная защита</h1>
+        <p id="mfa-hint">Введите код из приложения-аутентификатора.</p>
+        <form id="mfa-form">
+          <label for="code">Код</label>
+          <input id="code" inputmode="numeric" autocomplete="one-time-code" required />
+          <button type="submit" id="mfa-submit">Подтвердить</button>
+          <button type="button" class="link" id="mfa-sms">Получить код по SMS</button>
+          <div class="error" id="mfa-error"></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 3. QR -->
+    <section id="screen-qr" class="screen">
+      <div class="card qr-box">
+        <h1>Вход по QR</h1>
+        <p>Discord → Настройки → «Войти на другом устройстве»</p>
+        <img id="qr-img" alt="QR" hidden />
+        <div class="status" id="qr-status">Генерация…</div>
+        <button type="button" class="secondary" id="qr-back">Назад</button>
+      </div>
+    </section>
+
+    <!-- 4. приложение -->
+    <section id="screen-app" class="screen">
+      <aside>
+        <header>
+          <span id="me-name">…</span>
+          <span class="who" id="me-handle"></span>
+          <span id="conn">offline</span>
+          <button type="button" class="link" id="logout" style="margin: 0 0 0 auto">выход</button>
+        </header>
+        <div id="chats"></div>
+      </aside>
+      <main>
+        <header id="chat-title">Выбери чат слева</header>
+        <div id="messages"><div class="empty">Сообщения появятся здесь</div></div>
+        <form class="composer" id="composer">
+          <input id="draft" placeholder="Написать сообщение…" autocomplete="off" disabled />
+          <button type="submit" disabled>Отправить</button>
+        </form>
+      </main>
+    </section>
+
+    <script>
+      // ---------- конфигурация ----------
+      const API = localStorage.getItem("dsmod_api") || "http://127.0.0.1:8787";
+      const $ = (id) => document.getElementById(id);
+
+      const state = {
+        chats: [],
+        me: null,
+        channel: null,   // ChatDTO открытого чата
+        messages: [],    // MessageDTO[]
+        mfa: null,       // AuthChallenge type=mfa
+        qrTimer: null,
+        ws: null,
+      };
+
+      // ---------- утилиты ----------
+      function show(id) {
+        document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
+        $(id).classList.add("active");
+      }
+
+      async function api(path, options = {}) {
+        const res = await fetch(API + path, {
+          ...options,
+          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        });
+        const payload = await res.json().catch(() => null);
+        if (!payload || payload.ok === false) {
+          const message = payload?.error?.message || `HTTP ${res.status}`;
+          const err = new Error(message);
+          err.code = payload?.error?.code;
+          err.status = res.status;
+          throw err;
+        }
+        return payload.data;
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function avatarSrc(user, fallback) {
+        return user?.avatarUrl || fallback || defaultAvatar(user);
+      }
+
+      function defaultAvatar(user) {
+        const index = user?.defaultAvatarIndex ?? 0;
+        return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+      }
+
+      function timeOf(iso) {
+        return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      }
+
+      // ---------- вход ----------
+      $("login-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("login-error").textContent = "";
+        try {
+          const data = await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email: $("email").value, password: $("password").value }),
+          });
+          if (data.authenticated) return enterApp(data.me);
+          if (data.challenge?.type === "mfa") return askMfa(data.challenge);
+          $("login-error").textContent = data.error?.message || "Не удалось войти";
+        } catch (err) {
+          $("login-error").textContent = err.message;
+        }
+      });
+
+      function askMfa(challenge) {
+        state.mfa = challenge;
+        $("mfa-hint").textContent = challenge.maskedEmail
+          ? `Код отправлен на ${challenge.maskedEmail} или из приложения-аутентификатора.`
+          : "Введите код из приложения-аутентификатора.";
+        $("mfa-sms").hidden = !challenge.methods.includes("sms");
+        show("screen-mfa");
+      }
+
+      $("mfa-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("mfa-error").textContent = "";
+        try {
+          const data = await api("/api/auth/mfa", {
+            method: "POST",
+            body: JSON.stringify({
+              ticket: state.mfa.ticket,
+              loginInstanceId: state.mfa.loginInstanceId,
+              method: state.mfa.methods.includes("totp") ? "totp" : "sms",
+              code: $("code").value.trim(),
+            }),
+          });
+          if (data.authenticated) return enterApp(data.me);
+          $("mfa-error").textContent = data.error?.message || "Неверный код";
+        } catch (err) {
+          $("mfa-error").textContent = err.message;
+        }
+      });
+
+      $("mfa-sms").addEventListener("click", async () => {
+        const { phone } = await api("/api/auth/sms", { method: "POST", body: JSON.stringify({ ticket: state.mfa.ticket }) });
+        $("mfa-hint").textContent = `Код отправлен на ${phone ?? "номер"}`;
+      });
+
+      $("to-qr").addEventListener("click", startQr);
+      $("qr-back").addEventListener("click", () => {
+        clearInterval(state.qrTimer);
+        api("/api/auth/qr/cancel", { method: "POST" }).catch(() => {});
+        show("screen-login");
+      });
+
+      async function startQr() {
+        show("screen-qr");
+        $("qr-img").hidden = true;
+        $("qr-status").textContent = "Генерация…";
+        try {
+          const data = await api("/api/auth/qr", { method: "POST" });
+          renderQr(data.state);
+          // опрос + события из WS (см. ниже)
+          clearInterval(state.qrTimer);
+          state.qrTimer = setInterval(async () => {
+            try {
+              const current = await api("/api/auth/qr");
+              renderQr(current);
+            } catch {
+              /* мост перезапускался — молчим */
+            }
+          }, 1500);
+        } catch (err) {
+          $("qr-status").textContent = err.message;
+        }
+      }
+
+      function renderQr(qr) {
+        if (!qr) return;
+        if (qr.qrImage) {
+          $("qr-img").src = qr.qrImage;
+          $("qr-img").hidden = false;
+        }
+        const labels = {
+          waiting: "Наведи камеру на код",
+          scanned: `Отсканировано: ${qr.user?.username ?? ""} — подтверди на телефоне`,
+          approved: "Подтверждено!",
+          cancelled: "Отменено",
+          expired: "Код истёк, сгенерируй заново",
+          error: qr.error || "Ошибка",
+        };
+        $("qr-status").textContent = labels[qr.status] || "…";
+        if (qr.status === "approved") {
+          clearInterval(state.qrTimer);
+          setTimeout(() => api("/api/state").then((s) => enterApp(s.me)).catch(() => {}), 400);
+        }
+      }
+
+      $("logout").addEventListener("click", async () => {
+        await api("/api/auth/logout", { method: "POST" }).catch(() => {});
+        location.reload();
+      });
+
+      // ---------- приложение ----------
+      async function enterApp(me) {
+        clearInterval(state.qrTimer);
+        if (!me) {
+          try {
+            me = await api("/api/me");
+          } catch {
+            me = null;
+          }
+        }
+        state.me = me;
+        show("screen-app");
+        await loadState().catch((err) => {
+          $("me-name").textContent = "нет доступа";
+          console.error(err);
+        });
+        connectEvents();
+      }
+
+      async function loadState() {
+        const data = await api("/api/state");
+        state.me = data.me ?? state.me;
+        state.chats = data.chats ?? [];
+        $("me-name").textContent = state.me?.displayName || state.me?.username || "я";
+        $("me-handle").textContent = state.me ? "@" + state.me.username : "";
+        renderChats();
+      }
+
+      function renderChats() {
+        const box = $("chats");
+        box.innerHTML = "";
+        if (!state.chats.length) {
+          box.innerHTML = '<div class="empty" style="padding:24px">Нет чатов</div>';
+          return;
+        }
+        for (const chat of state.chats) {
+          const row = document.createElement("div");
+          row.className = "chat" + (state.channel?.id === chat.id ? " active" : "");
+          row.dataset.id = chat.id;
+          row.innerHTML = `
+            <img src="${chat.avatarUrl || defaultAvatar(chat.recipients[0])}" alt="" />
+            <div style="min-width:0">
+              <div class="name">${escapeHtml(chat.name)}</div>
+              <div class="preview">${chat.kind === "guild" ? "канал сервера" : "личные сообщения"}</div>
+            </div>`;
+          row.addEventListener("click", () => openChat(chat));
+          box.appendChild(row);
+        }
+      }
+
+      async function openChat(chat) {
+        state.channel = chat;
+        renderChats();
+        $("chat-title").textContent = chat.name;
+        $("draft").disabled = false;
+        $("composer").querySelector("button").disabled = false;
+        $("messages").innerHTML = '<div class="empty">Загрузка…</div>';
+        try {
+          state.messages = await api(`/api/channels/${chat.id}/messages?limit=50`);
+          renderMessages();
+        } catch (err) {
+          $("messages").innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+        }
+      }
+
+      function renderMessages() {
+        const box = $("messages");
+        box.innerHTML = "";
+        const ordered = [...state.messages].reverse(); // Discord отдаёт новые первыми
+        if (!ordered.length) {
+          box.innerHTML = '<div class="empty">Сообщений пока нет — напиши первым</div>';
+          return;
+        }
+        for (const m of ordered) {
+          const node = document.createElement("div");
+          node.className = "message";
+          node.dataset.id = m.id;
+          const attachments = m.attachments
+            .map((a) => (/\.(png|jpg|jpeg|gif|webp)$/i.test(a.filename) ? `<img class="attachment" src="${a.url}" alt="${escapeHtml(a.filename)}" />` : `<a href="${a.url}" target="_blank">${escapeHtml(a.filename)}</a>`))
+            .join("<br>");
+          node.innerHTML = `
+            <img class="avatar" src="${avatarSrc(m.author)}" alt="" />
+            <div class="body">
+              <div class="meta"><b>${escapeHtml(m.author.displayName)}</b><time>${timeOf(m.timestamp)}</time></div>
+              <div class="text">${escapeHtml(m.content)}</div>
+              ${attachments}
+            </div>`;
+          box.appendChild(node);
+        }
+        box.scrollTop = box.scrollHeight;
+      }
+
+      $("composer").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const content = $("draft").value.trim();
+        if (!content || !state.channel) return;
+        $("draft").value = "";
+        try {
+          const message = await api(`/api/channels/${state.channel.id}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ content }),
+          });
+          state.messages.unshift(message);
+          state.channel.lastMessageId = message.id;
+          renderMessages();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      // ---------- живые события ----------
+      function connectEvents() {
+        const url = API.replace(/^http/, "ws") + "/events";
+        const ws = new WebSocket(url);
+        state.ws = ws;
+        ws.onopen = () => {
+          $("conn").textContent = "live";
+          $("conn").classList.add("ok");
+        };
+        ws.onclose = () => {
+          $("conn").textContent = "offline";
+          $("conn").classList.remove("ok");
+          setTimeout(() => state.ws === ws && connectEvents(), 3000);
+        };
+        ws.onmessage = (event) => {
+          let frame;
+          try {
+            frame = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          handleEvent(frame);
+        };
+      }
+
+      function handleEvent(frame) {
+        const { t, d } = frame;
+        if (t === "MESSAGE_CREATE" && d) {
+          if (state.channel && d.channel_id === state.channel.id && !state.messages.some((m) => m.id === d.id)) {
+            state.messages.unshift(d);
+            renderMessages();
+          }
+          const chat = state.chats.find((c) => c.id === d.channel_id);
+          if (chat) {
+            chat.lastMessageId = d.id;
+            state.chats = [chat, ...state.chats.filter((c) => c.id !== chat.id)];
+            renderChats();
+          }
+        } else if (t === "MESSAGE_DELETE" && state.channel && d?.channel_id === state.channel.id) {
+          state.messages = state.messages.filter((m) => m.id !== d.id);
+          renderMessages();
+        } else if (t === "DSMOD_AUTH") {
+          if (!d?.authenticated) show("screen-login");
+        } else if (t === "DSMOD_QR") {
+          if ($("screen-qr").classList.contains("active")) renderQr(d);
+        } else if (t === "DSMOD_GATEWAY") {
+          $("conn").textContent = d?.status ?? "…";
+        }
+      }
+
+      // ---------- старт ----------
+      (async function init() {
+        try {
+          const health = await api("/api/health");
+          if (health.authenticated) return enterApp();
+        } catch {
+          $("login-error").textContent = `Мост недоступен: ${API} — запусти «bun start»`;
+        }
+        show("screen-login");
+      })();
+    </script>
+  </body>
+</html>
