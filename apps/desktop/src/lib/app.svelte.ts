@@ -58,42 +58,62 @@ class AppState {
 
   private ws: WebSocket | null = null;
   private guildsLoaded = false;
+  private booting: Promise<void> | null = null;
+  private bootAt = 0;
+  private refreshAt = 0;
 
   constructor() {
     void this.boot();
     this.connect();
   }
 
-  private async boot() {
-    this.bootError = "";
-    try {
-      const state = await fetchState();
-      this.me = state.me;
-      this.chats = state.chats;
-      this.sortChats();
-      this.indexChats();
-      this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
-      if (this.me) {
-        this.indexUser(this.me);
-        await this.loadGuilds();
-      }
-    } catch (error) {
-      this.bootError = error instanceof Error ? error.message : "Мост недоступен";
-    } finally {
-      this.ready = true;
+  private boot(force = false): Promise<void> {
+    if (this.booting) {
+      return force ? this.booting.then(() => this.boot(true)) : this.booting;
     }
+    if (!force && Date.now() - this.bootAt < 2000) return Promise.resolve();
+
+    const run = (async () => {
+      this.bootError = "";
+      try {
+        const state = await fetchState();
+        this.me = state.me;
+        this.chats = state.chats;
+        this.sortChats();
+        this.indexChats();
+        this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
+        if (this.me) {
+          this.indexUser(this.me);
+          await this.loadGuilds();
+        }
+      } catch (error) {
+        this.bootError = error instanceof Error ? error.message : "Мост недоступен";
+      } finally {
+        this.ready = true;
+      }
+    })();
+
+    this.booting = run.finally(() => {
+      this.booting = null;
+      this.bootAt = Date.now();
+    });
+    return this.booting;
   }
 
-  private async refreshChats() {
-    try {
-      const state = await fetchState();
-      this.me = state.me;
-      this.chats = state.chats;
-      this.sortChats();
-      this.indexChats();
-    } catch {
-      /* keep old data */
-    }
+  private refreshChats() {
+    if (Date.now() - this.refreshAt < 2000) return;
+    this.refreshAt = Date.now();
+    void (async () => {
+      try {
+        const state = await fetchState();
+        this.me = state.me;
+        this.chats = state.chats;
+        this.sortChats();
+        this.indexChats();
+      } catch {
+        /* keep old data */
+      }
+    })();
   }
 
   private connect() {
@@ -137,7 +157,7 @@ class AppState {
         this.outgoing = [];
         this.users = {};
       } else {
-        void this.boot();
+        void this.boot(true);
       }
       return;
     }
@@ -145,9 +165,11 @@ class AppState {
     if (t === "READY") {
       this.applyRelationships(d.relationships);
       if (Array.isArray(d.presences)) {
+        const next: PresenceMap = { ...this.presence };
         for (const p of d.presences) {
-          if (p?.user?.id && p.status) this.presence = { ...this.presence, [p.user.id]: p.status };
+          if (p?.user?.id && p.status) next[p.user.id] = p.status;
         }
+        this.presence = next;
       }
       if (Array.isArray(d.users)) {
         for (const u of d.users) {
@@ -172,6 +194,7 @@ class AppState {
       const channelId = d.channel_id as string | undefined;
       const userId = d.user_id as string | undefined;
       if (!channelId || !userId || userId === this.me.id) return;
+      this.pruneTyping();
       const chat = this.chatById(channelId);
       const name = this.typingName(chat, userId);
       const list = (this.typing[channelId] ?? []).filter((x) => x.name !== name);
@@ -213,6 +236,20 @@ class AppState {
   private typingName(chat: ChatDTO | undefined, userId: string): string {
     const r = chat?.recipients?.find((u) => u.id === userId) ?? this.users[userId];
     return r?.displayName || r?.username || "кто-то";
+  }
+
+  private pruneTyping() {
+    const now = Date.now();
+    let changed = false;
+    const next: typeof this.typing = { ...this.typing };
+    for (const channelId of Object.keys(next)) {
+      const list = next[channelId]!.filter((x) => now - x.at < 8000);
+      if (list.length !== next[channelId]!.length) {
+        next[channelId] = list;
+        changed = true;
+      }
+    }
+    if (changed) this.typing = next;
   }
 
   private indexUser(u: UserDTO | RelationshipEntry) {
@@ -395,7 +432,7 @@ class AppState {
       if (res.error) throw new Error(res.error.message);
       return res.challenge;
     }
-    await this.boot();
+    await this.boot(true);
     return null;
   }
 
@@ -410,14 +447,14 @@ class AppState {
       if (res.error) throw new Error(res.error.message);
       return res.challenge;
     }
-    await this.boot();
+    await this.boot(true);
     return null;
   }
 
   async loginToken(token: string): Promise<void> {
     const res = await authToken(token);
     if (!res.authenticated) throw new Error("Токен не принят");
-    await this.boot();
+    await this.boot(true);
   }
 
   async loginSms(ticket: string): Promise<string> {
@@ -426,7 +463,7 @@ class AppState {
   }
 
   async bootAfterQr(): Promise<void> {
-    await this.boot();
+    await this.boot(true);
   }
 
   async sendTyping(channelId: string): Promise<void> {

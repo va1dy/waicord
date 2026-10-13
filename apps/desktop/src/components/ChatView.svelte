@@ -2,6 +2,8 @@
   import { tick } from "svelte";
   import Avatar from "./Avatar.svelte";
   import { app } from "../lib/app.svelte";
+  import { contextMenu, type MenuItem } from "../lib/contextMenu.svelte";
+  import { copyText } from "../lib/clipboard";
   import { avatarOf, searchGifs, type ChatDTO, type MessageDTO } from "../lib/api";
 
   const active = $derived(app.viewKey());
@@ -97,20 +99,35 @@
     | { kind: "link"; url: string }
     | { kind: "image"; url: string };
 
+  const IMAGE_HOSTS = [
+    "giphy.com",
+    "tenor.com",
+    "klippy.com",
+    "media.discordapp.net",
+    "cdn.discordapp.com",
+    "images-ext-1.discordapp.net",
+    "images-ext-2.discordapp.net",
+    "i.imgur.com",
+    "imgur.com",
+    "i.redd.it",
+    "preview.redd.it",
+  ];
+
   function isImageUrl(url: string): boolean {
     const clean = url.split(/[?#]/)[0] ?? url;
-    if (/\.(gif|png|jpe?g|webp|avif)$/i.test(clean)) return true;
+    if (/\.(gif|png|jpe?g|webp|avif|bmp)$/i.test(clean)) return true;
     try {
-      const host = new URL(url).hostname;
-      return (
-        host.endsWith("giphy.com") ||
-        host === "media.discordapp.net" ||
-        host === "cdn.discordapp.com" ||
-        host === "i.imgur.com"
-      );
+      const host = new URL(url).hostname.toLowerCase();
+      return IMAGE_HOSTS.some((h) => host === h || host.endsWith("." + h));
     } catch {
       return false;
     }
+  }
+
+  function onImgError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    const wrap = img.parentElement;
+    if (wrap) wrap.classList.add("img-failed");
   }
 
   function parseContent(content: string): Seg[] {
@@ -214,6 +231,26 @@
     }
   }
 
+  function onMessageContext(e: MouseEvent, group: Group) {
+    const link = (e.target as HTMLElement).closest?.("a[href]");
+    if (link) return;
+    e.preventDefault();
+
+    const text = group.items
+      .map((m) => m.content.trim())
+      .filter(Boolean)
+      .join("\n");
+    const channelId = group.items[0]?.channelId ?? active;
+    const messageLink = `https://discord.com/channels/${chat?.guildId ?? "@me"}/${channelId}/${group.id}`;
+    const image = group.items.flatMap((m) => m.attachments ?? []).find((a) => isImage(a));
+
+    const items: MenuItem[] = [];
+    if (text) items.push({ label: "Копировать текст", run: () => void copyText(text) });
+    items.push({ label: "Копировать ссылку на сообщение", run: () => void copyText(messageLink) });
+    if (image) items.push({ label: "Копировать ссылку на картинку", run: () => void copyText(image.url) });
+    contextMenu.show(e, items);
+  }
+
   async function submit(event: Event) {
     event.preventDefault();
     if (sending) return;
@@ -260,7 +297,12 @@
       <p class="mt-8 text-center text-[13px] text-fg-muted">Сообщений пока нет — напиши первым.</p>
     {/if}
     {#each grouped as group (group.id)}
-      <div class="mt-3 flex gap-3 first:mt-0">
+      <div
+        data-message
+        role="article"
+        oncontextmenu={(e) => onMessageContext(e, group)}
+        class="mt-3 flex gap-3 first:mt-0 [content-visibility:auto] [contain-intrinsic-size:auto_140px]"
+      >
         <Avatar username={group.author} url={group.avatarUrl} defaultIndex={group.defaultIndex} size={34} />
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline gap-2">
@@ -272,7 +314,13 @@
               <div class="mt-1 flex flex-wrap gap-1.5">
                 {#each item.attachments as att (att.id + att.url)}
                   {#if isImage(att)}
-                    <img src={att.url} alt={att.filename} class="max-h-64 rounded-lg border border-line/50 object-contain" />
+                    <img
+                      src={att.url}
+                      alt={att.filename}
+                      loading="lazy"
+                      decoding="async"
+                      class="max-h-64 rounded-lg border border-line/50 object-contain"
+                    />
                   {:else if isVideo(att)}
                     <!-- svelte-ignore a11y_media_has_caption -->
                     <video src={att.url} controls class="max-h-64 rounded-lg border border-line/50" aria-label={att.filename}></video>
@@ -292,12 +340,30 @@
               </div>
             {/if}
             {#each item.embeds ?? [] as embed, i (item.id + "-e" + i)}
-              {#if embed.image?.url}
-                <img src={embed.image.url} alt={embed.title ?? "embed"} class="mt-1 max-h-64 rounded-lg border border-line/50 object-contain" />
-              {:else if embed.title}
+              {@const embedImg = embed.image?.url || embed.thumbnail?.url}
+              {#if embedImg}
+                <span class="mt-1 inline-block">
+                  <img
+                    src={embedImg}
+                    alt={embed.title ?? "превью"}
+                    loading="lazy"
+                    decoding="async"
+                    onerror={onImgError}
+                    class="max-h-80 rounded-lg border border-line/50 object-contain"
+                  />
+                  <a href={embedImg} target="_blank" rel="noreferrer" class="hidden text-accent hover:underline">{embedImg}</a>
+                </span>
+              {/if}
+              {#if embed.title || embed.description}
                 <div class="mt-1 max-w-md rounded-lg border border-line bg-panel-soft px-3 py-2">
-                  {#if embed.title}<p class="text-[13px] font-semibold">{embed.title}</p>{/if}
-                  {#if embed.description}<p class="text-[12px] text-fg-muted">{embed.description}</p>{/if}
+                  {#if embed.url && embed.title}
+                    <a href={embed.url} target="_blank" rel="noreferrer" class="text-[13px] font-semibold text-accent hover:underline">{embed.title}</a>
+                  {:else if embed.title}
+                    <p class="text-[13px] font-semibold">{embed.title}</p>
+                  {/if}
+                  {#if embed.description}
+                    <p class="mt-0.5 text-[12px] text-fg-muted">{embed.description}</p>
+                  {/if}
                 </div>
               {/if}
             {/each}
@@ -318,12 +384,24 @@
                 {/each}
               </p>
               {#each segs.filter((s) => s.kind === "image") as img, ii (item.id + "-img" + ii)}
-                <img
-                  src={img.kind === "image" ? img.url : ""}
-                  alt="изображение"
-                  loading="lazy"
-                  class="mt-1 max-h-80 rounded-lg border border-line/50 object-contain"
-                />
+                <span class="mt-1 inline-block">
+                  <img
+                    src={img.kind === "image" ? img.url : ""}
+                    alt="изображение"
+                    loading="lazy"
+                    onerror={onImgError}
+                    class="max-h-80 rounded-lg border border-line/50 object-contain"
+                  />
+                  {#if img.kind === "image"}
+                    <a
+                      href={img.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="hidden text-accent hover:underline"
+                      >{img.url}</a
+                    >
+                  {/if}
+                </span>
               {/each}
             {/if}
           {/each}
@@ -360,7 +438,7 @@
           <div class="mt-2 grid max-h-48 grid-cols-4 gap-1.5 overflow-y-auto">
             {#each gifs as url (url)}
               <button type="button" onclick={() => pickGif(url)} class="overflow-hidden rounded-lg transition hover:opacity-80">
-                <img src={url} alt="gif" class="h-20 w-full object-cover" />
+                <img src={url} alt="gif" loading="lazy" decoding="async" class="h-20 w-full object-cover" />
               </button>
             {/each}
           </div>

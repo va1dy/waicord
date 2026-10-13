@@ -28,6 +28,7 @@
   <img
     {src}
     alt={username}
+    decoding="async"
     class="inline-block shrink-0 rounded-full object-cover"
     style="width:{size}px;height:{size}px"
   />
