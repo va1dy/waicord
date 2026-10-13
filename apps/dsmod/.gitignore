@@ -1,0 +1,19 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# secrets & sessions — никогда не коммитить
+.env
+.env.*
+!.env.example
+*.session.json
+session.json
+.dsmod/
+
+# editors / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
