@@ -75,22 +75,28 @@ class AppState {
 
     const run = (async () => {
       this.bootError = "";
-      try {
-        const state = await fetchState();
-        this.me = state.me;
-        this.chats = state.chats;
-        this.sortChats();
-        this.indexChats();
-        this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
-        if (this.me) {
-          this.indexUser(this.me);
-          await this.loadGuilds();
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const state = await fetchState();
+          this.me = state.me;
+          this.chats = state.chats;
+          this.sortChats();
+          this.indexChats();
+          this.gatewayStatus = state.gateway.connected ? "ready" : "connecting";
+          if (this.me) {
+            this.indexUser(this.me);
+            await this.loadGuilds();
+          }
+          this.ready = true;
+          return;
+        } catch (error) {
+          lastError = error;
+          await sleep(500);
         }
-      } catch (error) {
-        this.bootError = error instanceof Error ? error.message : "Мост недоступен";
-      } finally {
-        this.ready = true;
       }
+      this.bootError = lastError instanceof Error ? lastError.message : "Мост недоступен";
+      this.ready = true;
     })();
 
     this.booting = run.finally(() => {

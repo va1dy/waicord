@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "icons": "tauri icon public/waicord.svg",
+    "build:bridge": "bun build --compile ../dsmod/src/server/main.ts --outfile src-tauri/binaries/dsmod-bridge-x86_64-pc-windows-msvc.exe",
     "tauri": "tauri"
   },
   "dependencies": {
