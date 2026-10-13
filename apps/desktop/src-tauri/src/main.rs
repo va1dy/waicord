@@ -13,9 +13,22 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const BRIDGE_PORT: u16 = 8787;
-const BRIDGE_EXE: &str = "dsmod-bridge-x86_64-pc-windows-msvc.exe";
 
 static BRIDGE: Mutex<Option<Child>> = Mutex::new(None);
+
+fn bridge_exe(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Tauri strips the target-triple suffix when bundling external binaries.
+    for name in [
+        "dsmod-bridge.exe",
+        "dsmod-bridge-x86_64-pc-windows-msvc.exe",
+    ] {
+        let p = dir.join(name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
 
 fn bridge_alive() -> bool {
     let mut stream = match TcpStream::connect_timeout(
@@ -39,10 +52,7 @@ fn spawn_bridge() {
     }
     let Ok(exe) = std::env::current_exe() else { return };
     let Some(dir) = exe.parent() else { return };
-    let bridge = dir.join(BRIDGE_EXE);
-    if !bridge.exists() {
-        return;
-    }
+    let Some(bridge) = bridge_exe(dir) else { return };
     let mut cmd = Command::new(&bridge);
     cmd.current_dir(dir)
         .stdin(Stdio::null())
