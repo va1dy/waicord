@@ -115,6 +115,91 @@ export interface GuildDTO {
   raw: Record<string, unknown>;
 }
 
+/** Фаза голосового подключения (карточка звонка в UI). */
+export type VoicePhase =
+  /** не в голосе */
+  | "idle"
+  /** отправлен op4 Voice State Update, ждём session/endpoint */
+  | "signalling"
+  /* идёт WS/UDP-хендшейк */
+  | "connecting"
+  /** соединение готово, идёт аудио */
+  | "ready"
+  /** переподключение (упал сервер/сеть) */
+  | "reconnecting"
+  /** завершено с ошибкой (кик, лимит попыток) */
+  | "disconnected";
+
+/** Состояние E2EE-сессии DAVE (обязательна для звонков с 03.2026). */
+export interface VoiceDaveDTO {
+  /** Версия протокола (0 — E2EE выключено) */
+  version: number;
+  /** Готова ли MLS-группа к обмену ключами */
+  ready: boolean;
+  /** Сравнимый код приватности участников звонка */
+  privacyCode: string;
+}
+
+/** Голосовое состояние участника: голосовой канал сервера или звонок в ЛС. */
+export interface VoiceStateDTO {
+  userId: Snowflake;
+  /** Для звонка в ЛС — id чата */
+  channelId: Snowflake | null;
+  guildId: Snowflake | null;
+  sessionId: string;
+  /** Сервер заглушил участника */
+  deaf: boolean;
+  mute: boolean;
+  selfDeaf: boolean;
+  selfMute: boolean;
+  selfVideo: boolean;
+  suppress: boolean;
+  raw: Record<string, unknown>;
+}
+
+/** Статус голосового подключения текущего пользователя. */
+export interface VoiceConnectionDTO {
+  phase: VoicePhase;
+  guildId: Snowflake | null;
+  /** Голосовой канал; для звонка в ЛС — id чата */
+  channelId: Snowflake | null;
+  ssrc: number | null;
+  /** Режим транспортного шифрования UDP */
+  mode: string | null;
+  /** Текущие флаги speaking (0 — молчим) */
+  speaking: number;
+  /** Код закрытия последнего voice-WS, если обрыв уже был */
+  closeCode: number | null;
+  dave: VoiceDaveDTO;
+  participants: VoiceStateDTO[];
+}
+
+/** Участник сервера — GET /api/guilds/{id}/members. */
+export interface GuildMemberDTO {
+  userId: Snowflake;
+  user: UserDTO | null;
+  nick: string | null;
+  /** id ролей участника */
+  roles: Snowflake[];
+  joinedAt: string | null;
+  raw: Record<string, unknown>;
+}
+
+/** Роль сервера — GET /api/guilds/{id}/roles. */
+export interface RoleDTO {
+  id: Snowflake;
+  name: string;
+  /** Цвет в виде числа 0xRRGGBB */
+  color: number;
+  /** Права в виде десятичной строки */
+  permissions: string;
+  /** Отображать отдельной группой в списке участников */
+  hoist: boolean;
+  mentionable: boolean;
+  position: number;
+  raw: Record<string, unknown>;
+}
+
 export type ChatKind = ChatDTO["kind"];
 
 /** Состояние входа, которое UI отображает на экране логина */

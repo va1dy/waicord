@@ -1,6 +1,6 @@
-import { byLastMessage, toChat, toGuild, toMessage, toUser } from "./dto";
+import { byLastMessage, toChat, toGuild, toGuildMember, toMessage, toRole, toUser } from "./dto";
 import type { DiscordRest } from "./http/client";
-import type { ChatDTO, GuildDTO, MessageDTO, Snowflake, UserDTO } from "./types";
+import type { ChatDTO, GuildDTO, GuildMemberDTO, MessageDTO, RoleDTO, Snowflake, UserDTO } from "./types";
 
 export interface MessageQuery {
   /** 1..100, по умолчанию 50 */
@@ -72,6 +72,20 @@ export class Resources {
   async guildChats(id: Snowflake): Promise<ChatDTO[]> {
     const channels = await this.rest.get<Record<string, any>[]>(`/guilds/${id}/channels`);
     return channels.map(toChat);
+  }
+
+  /** Участники сервера — GET /guilds/{guild.id}/members (пагинация limit/after) */
+  async guildMembers(id: Snowflake, query: { limit?: number; after?: Snowflake } = {}): Promise<GuildMemberDTO[]> {
+    const members = await this.rest.get<Record<string, any>[]>(`/guilds/${id}/members`, {
+      query: { limit: query.limit ?? 100, after: query.after },
+    });
+    return members.map(toGuildMember);
+  }
+
+  /** Роли сервера — GET /guilds/{guild.id}/roles */
+  async guildRoles(id: Snowflake): Promise<RoleDTO[]> {
+    const roles = await this.rest.get<Record<string, any>[]>(`/guilds/${id}/roles`);
+    return roles.map(toRole);
   }
 
   /** Сообщения канала — GET /channels/{channel.id}/messages */

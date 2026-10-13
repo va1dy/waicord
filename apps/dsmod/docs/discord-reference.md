@@ -42,6 +42,21 @@ Discord не публикует их в docs — значения взяты и�
 | QR-шлюз | `wss://remote-auth-gateway.discord.gg/?v=2` | ✅ |
 | Личные переписки | `GET /users/@me/channels` | ✅ (используется официальным веб-клиентом, но выведен из публичных docs) |
 
+## Голос, DAVE и видео
+
+Протокол голоса, E2EE и видео — где искать первоисточники (само по себе docs не
+публикует):
+
+| Что | Источник |
+|---|---|
+| Voice connections: подключение, IP discovery, DAVE | https://discord.com/developers/docs/topics/voice-connections |
+| Опкоды voice-gateway и статус-коды | https://discord.com/developers/docs/topics/opcodes-and-status-codes |
+| Спецификация DAVE (E2EE) | https://daveprotocol.com/ |
+| Эталонные библиотеки DAVE, включая samples/typescript | https://github.com/discord/libdave |
+| Протокол видео / Go Live (ISC) | https://github.com/Discord-RE/Discord-video-stream |
+
+Разбор реализации dsmod — [voice.md](voice.md).
+
 ## Политика безопасности заголовков
 
 Чтобы API не отбрасывал запросы, клиент шлёт те же заголовки, что и настоящий клиент:

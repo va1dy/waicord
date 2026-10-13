@@ -17,6 +17,9 @@
 | Чтение / отправка / редактирование / удаление сообщений | ✅ |
 | Пагинация (`before/after/around`), «печатает…», закрепы | ✅ |
 | Серверы и их каналы | ✅ |
+| Участники и роли серверов | ✅ |
+| Голосовые каналы и звонки в ЛС (join/leave/mute/speaking, аудио в обе стороны, E2EE DAVE) | ✅ |
+| Демонстрация экрана (захват кадров → WS) | ✅ |
 | Gateway: `MESSAGE_CREATE/UPDATE/DELETE`, typing, presence… | ✅ |
 | Rate-limit aware REST-клиент | ✅ |
 | Локальный HTTP + WebSocket мост для UI | ✅ |

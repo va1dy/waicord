@@ -6,6 +6,7 @@ import { GatewayClient, type GatewayOptions } from "./gateway";
 import { DiscordRest } from "./http/client";
 import { Resources } from "./resources";
 import type { AuthResult, EventFrame, SessionDTO, UserDTO } from "./types";
+import { VoiceManager } from "./voice/manager";
 
 export interface ClientEventMap {
   /** Любое gateway-событие (MESSAGE_CREATE, TYPING_START, …) */
@@ -35,6 +36,8 @@ export class DscClient extends EventEmitter {
   readonly auth: Authenticator;
   /** Все методы Discord API (чаты, сообщения, серверы, пользователи). */
   readonly api: Resources;
+  /** Голос: звонки, голосовые каналы, аудио (см. docs/voice.md). */
+  readonly voice: VoiceManager;
   readonly options: ResolvedOptions;
 
   /** Текущая сессия (после restore/login). */
@@ -49,6 +52,13 @@ export class DscClient extends EventEmitter {
     this.rest = new DiscordRest(this.options);
     this.auth = new Authenticator(this.rest, this.options.sessionPath);
     this.api = new Resources(this.rest);
+    this.voice = new VoiceManager(this);
+    // события голоса пробрасываем наверх — мост слушает их как DSMOD_VOICE*
+    this.voice.on("status", (dto: unknown) => this.emit("voice", dto));
+    this.voice.on("dave", (state: unknown) => this.emit("voice-dave", state));
+    this.voice.on("speaking", (event: unknown) => this.emit("voice-speaking", event));
+    this.voice.on("audio", (event: unknown) => this.emit("voice-audio", event));
+    this.voice.on("debug", (message: unknown) => this.emit("debug", message));
     // слушатель по умолчанию: иначе EventEmitter бросает при 'error' без подписчиков
     this.on("error", () => undefined);
   }
@@ -138,12 +148,14 @@ export class DscClient extends EventEmitter {
     for (const name of ["ready", "resumed", "status", "error", "close"] as const) {
       gateway.on(name, (...args: unknown[]) => this.emit(name, ...args));
     }
+    this.voice.attach(gateway);
 
     await gateway.connect();
   }
 
-  /** Закрывает Gateway (HTTP-мост продолжает работать). */
+  /** Закрывает Gateway и голос (HTTP-мост продолжает работать). */
   disconnect(): void {
+    this.voice.stop();
     this.gateway?.disconnect();
   }
 }

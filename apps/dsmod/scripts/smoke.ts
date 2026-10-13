@@ -28,6 +28,8 @@ results.push(["GET /api/health", await call("GET", "/api/health")]);
 results.push(["GET /api/state", await call("GET", "/api/state")]);
 results.push(["GET /api/chats (без входа)", await call("GET", "/api/chats")]);
 results.push(["POST /api/channels/0/messages (bad id)", await call("POST", "/api/channels/0/messages", { content: "hi" })]);
+results.push(["GET /api/voice", await call("GET", "/api/voice")]);
+results.push(["GET /api/screen", await call("GET", "/api/screen")]);
 results.push(["GET /api/nope", await call("GET", "/api/nope")]);
 
 for (const [name, value] of results) {

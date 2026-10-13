@@ -9,7 +9,16 @@ export { DiscordRest, type HttpMethod, type RequestOptions } from "./http/client
 export { Authenticator, QrSession, loginWithPassword, solveMfa, loadSession, saveSession, clearSession } from "./auth";
 export { GatewayClient, DEFAULT_BOT_INTENTS, type GatewayOptions, type GatewayStatus } from "./gateway";
 export { resolveOptions, API_VERSION, DEFAULT_USER_AGENT, type DscOptions } from "./config";
-export { toChat, toGuild, toMessage, toUser, defaultAvatarUrl } from "./dto";
+export { toChat, toGuild, toMessage, toUser, defaultAvatarUrl, toVoiceState, toGuildMember, toRole } from "./dto";
+export {
+  VoiceManager,
+  VoiceConnection,
+  OpusCodec,
+  type JoinVoicePayload,
+  type VoiceConnectionOptions,
+  type VoiceLinkPhase,
+  type VoiceLinkStatus,
+} from "./voice/index";
 export * from "./errors";
 export * from "./types";
 export { startBridge, type Bridge, type BridgeOptions } from "./server/server";

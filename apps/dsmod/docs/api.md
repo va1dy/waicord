@@ -31,6 +31,9 @@
 | 404 | `not_found` | нет такого маршрута |
 | 429 | превышен rate-limit Discord | `details.retryAfter` — секунды |
 | 500 | `internal_error` | непредвиденное |
+| 503 | `gateway_required` | Gateway не подключён — нельзя войти в голос |
+| 409 | `not_in_voice` | нет активного голосового подключения |
+| 409 | `conflict` | звонок идёт в другом канале |
 
 Заголовки: `Content-Type: application/json`, `Access-Control-Allow-Origin: *` —
 поэтому работает из браузера, Tauri-webview и `file://`.
@@ -45,7 +48,9 @@
 ```
 
 `t` — имя события: либо реальное событие Gateway (`MESSAGE_CREATE`), либо служебное
-(`DSMOD_HELLO`, `DSMOD_AUTH`, `DSMOD_QR`, `DSMOD_GATEWAY`, `DSMOD_PONG`).
+(`DSMOD_HELLO`, `DSMOD_AUTH`, `DSMOD_QR`, `DSMOD_GATEWAY`, `DSMOD_PONG`,
+`DSMOD_VOICE*`, `DSMOD_SCREEN_STATUS`, `DSMOD_SCREEN_FRAME`, `DSMOD_DEBUG` —
+см. [events.md](events.md)).
 После подключения клиент может отправить строку `ping` → придёт `DSMOD_PONG`.
 
 ---
@@ -84,6 +89,7 @@
 | GET | `/api/me` | — | `UserDTO` |
 | GET | `/api/chats` | — | `ChatDTO[]` (сортировка: свежие сверху) |
 | GET | `/api/chats/{id}` | — | `ChatDTO` |
+| GET | `/api/channels/{id}` | — | `ChatDTO` — любой канал, включая голосовые (type 2/13) |
 | GET | `/api/channels/{id}/messages` | `?limit=50&before=&after=&around=` | `MessageDTO[]` (новые первыми) |
 | POST | `/api/channels/{id}/messages` | `{content, reply_to?, tts?, embeds?, flags?, nonce?}` | `MessageDTO` |
 | POST | `/api/channels/{id}/typing` | — | `{ok:true}` |
@@ -93,9 +99,46 @@
 | GET | `/api/guilds` | — | `GuildDTO[]` |
 | GET | `/api/guilds/{id}` | — | `GuildDTO` |
 | GET | `/api/guilds/{id}/channels` | — | `ChatDTO[]` |
+| GET | `/api/guilds/{id}/members` | `?limit=1..100&after=<snowflake>` | `GuildMemberDTO[]` (limit по умолчанию 100, after — для пагинации) |
+| GET | `/api/guilds/{id}/roles` | — | `RoleDTO[]` |
 
 `limit` ограничен 100 (ограничение Discord). Пагинация — через `before=<id последнего
 сообщения>`.
+
+### Голос
+
+| Метод | Путь | Тело | Ответ `data` |
+|---|---|---|---|
+| GET | `/api/voice` | — | `VoiceConnectionDTO` — статус голосового подключения |
+| POST | `/api/voice/join` | `{channelId, guildId?, selfMute?, selfDeaf?}` | `VoiceConnectionDTO` |
+| POST | `/api/voice/leave` | — | `VoiceConnectionDTO` (`phase → idle`) |
+| POST | `/api/voice/state` | `{selfMute?, selfDeaf?}` | `VoiceConnectionDTO` |
+| POST | `/api/voice/speaking` | `{speaking}` | `VoiceConnectionDTO` |
+| POST | `/api/voice/audio` | `{pcm}` | `{sent}` |
+| POST | `/api/voice/options` | `{forwardAudio?}` | `{forwardAudio}` |
+| POST | `/api/chats/{id}/call` | — | `VoiceConnectionDTO` — начать звонок в ЛС |
+| DELETE | `/api/chats/{id}/call` | — | `VoiceConnectionDTO` — закончить звонок |
+
+- `guildId: null` / нет поля — звонок в ЛС (`channelId` = id чата).
+- `state`/`speaking`/`audio` без активного подключения → ошибка `not_in_voice`.
+- `speaking`: `boolean | number` (битовая маска: 1 — голос).
+- `pcm` — base64 PCM **s16le, 48 кГц, стерео, длина кратна 3840 байтам** (3840 байт =
+  20 мс); иначе `invalid_body`. `sent` — число отправленных 20-мс фреймов.
+- `options` включает рассылку входящего аудио в UI (`DSMOD_VOICE_AUDIO`).
+- `DELETE /api/chats/{id}/call` при звонке в другом канале → ошибка `conflict`.
+
+Подробности протокола — [voice.md](voice.md).
+
+### Демонстрация экрана
+
+| Метод | Путь | Тело | Ответ `data` |
+|---|---|---|---|
+| GET | `/api/screen` | — | `ScreenStatus` |
+| POST | `/api/screen/start` | `{fps?, width?}` | `ScreenStatus` |
+| POST | `/api/screen/stop` | — | `ScreenStatus` |
+
+`fps` — 1..10 (по умолчанию 2), `width` — 320..1920 px (по умолчанию 1280); повторный
+`start` — перезапуск с новыми параметрами. Кадры приходят событием `DSMOD_SCREEN_FRAME`.
 
 ---
 
@@ -150,6 +193,103 @@
 
 `{id, name, iconUrl, owner, memberCount, features, raw}`
 
+### VoicePhase
+
+`"idle" | "signalling" | "connecting" | "ready" | "reconnecting" | "disconnected"`
+
+Фазы переходов и таймауты — в [voice.md](voice.md).
+
+### VoiceDaveDTO
+
+Состояние E2EE-сессии DAVE.
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `version` | number | версия протокола (0 — E2EE выключено) |
+| `ready` | boolean | готова ли MLS-группа к обмену ключами |
+| `privacyCode` | string | сравнимый код приватности участников звонка |
+
+### VoiceStateDTO
+
+Голосовое состояние участника: голосовой канал сервера или звонок в ЛС.
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `userId` | string | snowflake |
+| `channelId` | string \| null | для звонка в ЛС — id чата |
+| `guildId` | string \| null | `null` для звонка в ЛС |
+| `sessionId` | string | |
+| `deaf` | boolean | сервер заглушил участника |
+| `mute` | boolean | сервер заглушил участника |
+| `selfDeaf` | boolean | |
+| `selfMute` | boolean | |
+| `selfVideo` | boolean | |
+| `suppress` | boolean | |
+| `raw` | object | |
+
+### VoiceConnectionDTO
+
+Статус голосового подключения текущего пользователя.
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `phase` | `VoicePhase` | |
+| `guildId` | string \| null | `null` для звонка в ЛС |
+| `channelId` | string \| null | голосовой канал; для звонка в ЛС — id чата |
+| `ssrc` | number \| null | |
+| `mode` | string \| null | режим транспортного шифрования UDP |
+| `speaking` | number | текущие флаги speaking (0 — молчим) |
+| `closeCode` | number \| null | код закрытия последнего voice-WS, если обрыв уже был |
+| `dave` | `VoiceDaveDTO` | |
+| `participants` | `VoiceStateDTO[]` | участники канала |
+
+### GuildMemberDTO
+
+Участник сервера.
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `userId` | string | snowflake |
+| `user` | `UserDTO` \| null | |
+| `nick` | string \| null | |
+| `roles` | string[] | id ролей участника |
+| `joinedAt` | string \| null | ISO-8601 |
+| `raw` | object | |
+
+### RoleDTO
+
+Роль сервера.
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `id` | string | snowflake |
+| `name` | string | |
+| `color` | number | 0xRRGGBB |
+| `permissions` | string | десятичная строка |
+| `hoist` | boolean | отображать отдельной группой |
+| `mentionable` | boolean | |
+| `position` | number | |
+| `raw` | object | |
+
+### ScreenStatus
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `active` | boolean | идёт ли захват |
+| `fps` | number | |
+| `width` | number | ширина кадра в px |
+| `frames` | number | сколько кадров отправлено с момента старта |
+| `lastFrameAt` | string \| null | ISO-8601 |
+| `error` | string \| null | |
+
+### ScreenFrame
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `seq` | number | порядковый номер кадра |
+| `ts` | string | ISO-8601 |
+| `jpeg` | string | base64 — рисовать как `<img src="data:image/jpeg;base64,{jpeg}">` |
+
 ### QrStateDTO
 
 `{status, url, qrImage, fingerprint, expiresAt, user, token, error}`
@@ -185,6 +325,7 @@ import { createClient, DscClient } from "./src/index";
 | `client.loadMe()` | `GET /users/@me` → `UserDTO` |
 | `client.connect()` / `disconnect()` | gateway |
 | `client.on("MESSAGE_CREATE", fn)` | события (`d` — сырой объект Discord) |
+| `client.voice` | `VoiceManager` — звонки и голосовые каналы (см. ниже) |
 | `client.api` | все методы ресурсов (ниже) |
 | `client.rest` | низкоуровневый REST (`get/post/patch/put/del`) |
 
@@ -199,6 +340,8 @@ import { createClient, DscClient } from "./src/index";
 | `guilds()` | `GET /users/@me/guilds` |
 | `guild(id)` | `GET /guilds/{guild.id}` |
 | `guildChats(id)` | `GET /guilds/{guild.id}/channels` |
+| `guildMembers(id, {limit,after})` | `GET /guilds/{guild.id}/members` |
+| `guildRoles(id)` | `GET /guilds/{guild.id}/roles` |
 | `messages(channelId, {limit,before,after,around})` | `GET /channels/{id}/messages` |
 | `message(channelId, messageId)` | `GET /channels/{id}/messages/{id}` |
 | `send(channelId, text \| payload)` | `POST /channels/{id}/messages` |
@@ -209,6 +352,35 @@ import { createClient, DscClient } from "./src/index";
 | `pin/unpin/pins(channelId, messageId?)` | пин-эндпоинты |
 
 `send` принимает строку или объект; поле `reply_to` превращается в `message_reference`.
+
+### `client.voice` (VoiceManager)
+
+Голос: звонки и голосовые каналы (подробный разбор — [voice.md](voice.md)).
+
+| Метод / геттер | Что делает |
+|---|---|
+| `voice.join({channelId, guildId?, selfMute?, selfDeaf?})` | войти в голосовой канал / начать звонок в ЛС (`guildId: null`) → `VoiceConnectionDTO` |
+| `voice.leave()` | выйти → `VoiceConnectionDTO` (`phase → idle`) |
+| `voice.setState({selfMute?, selfDeaf?})` | включить/выключить мут/деаф → `VoiceConnectionDTO` |
+| `voice.setSpeaking(flags)` | битовая маска speaking (1 — голос) |
+| `voice.sendPcm(buffer)` | PCM (s16le 48 кГц стерео, кратно 3840 байтам) → число отправленных фреймов |
+| `voice.status()` | текущий `VoiceConnectionDTO` |
+| `voice.setForwardAudio(bool)` | рассылать ли входящее аудио (`voice-audio`) |
+| `voice.channelId` | id текущего канала или `null` |
+| `voice.audioForwarding` | включена ли пересылка аудио |
+
+События клиента:
+
+| Событие | `d` |
+|---|---|
+| `client.on("voice", fn)` | `VoiceConnectionDTO` — каждая смена фазы/участников/speaking (бывает часто) |
+| `client.on("voice-dave", fn)` | `VoiceDaveDTO` — состояние E2EE |
+| `client.on("voice-speaking", fn)` | `{userId, ssrc, speaking}` |
+| `client.on("voice-audio", fn)` | `{userId, pcm}` — `pcm` это `Buffer` (на WS то же событие, но base64) |
+| `client.on("debug", fn)` | отладочные сообщения голосового/DAVE-слоя |
+
+`join` без подключённого Gateway бросает `gateway_required`; `setState`/`setSpeaking`/
+`sendPcm` без подключения — `not_in_voice`.
 
 ### Ошибки
 

@@ -13,6 +13,9 @@
     "check": "bun run typecheck"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@snazzah/davey": "^0.1.12",
+    "opusscript": "^0.1.1",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
