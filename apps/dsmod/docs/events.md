@@ -32,6 +32,25 @@
 
 `status`: `connecting → ready → (reconnecting) → ready | closed`.
 
+## Свои события моста
+
+События уровня моста (не путать с сырыми событиями Gateway — у них `t` без префикса
+`DSMOD`).
+
+| `t` | `d` | Когда |
+|---|---|---|
+| `DSMOD_VOICE` | `VoiceConnectionDTO` | любая смена фазы/участников/speaking — **бывает часто** |
+| `DSMOD_VOICE_DAVE` | `VoiceDaveDTO` | состояние E2EE (`version`, `ready`, `privacyCode`) |
+| `DSMOD_VOICE_SPEAKING` | `{userId, ssrc, speaking}` | `speaking` — битовая маска, `0` = замолчал |
+| `DSMOD_VOICE_AUDIO` | `{userId, pcm}` | входящее аудио; `pcm` — base64 PCM s16le 48 кГц стерео, ровно 3840 байт (20 мс). Только при включённом `forwardAudio` (`POST /api/voice/options`) |
+| `DSMOD_SCREEN_STATUS` | `ScreenStatus` | захват экрана запущен/остановлен/упал |
+| `DSMOD_SCREEN_FRAME` | `ScreenFrame` | новый кадр: `<img src="data:image/jpeg;base64,{jpeg}">` |
+| `DSMOD_DEBUG` | `{message}` | отладочные сообщения голосового/DAVE-слоя |
+
+DTO описаны в [api.md](api.md). Сырые `VOICE_STATE_UPDATE` / `VOICE_SERVER_UPDATE` от
+Discord проходят как обычные gateway-события (`t` без префикса `DSMOD`) — как и другие
+события.
+
 ## События, на которые стоит подписаться в чате
 
 | `t` | Что делать в UI |
@@ -72,6 +91,24 @@ ws.onmessage = (event) => {
 };
 
 ws.onclose = () => setTimeout(connect, 3000);   // мост мог перезапуститься
+```
+
+Голос и демонстрация экрана:
+
+```ts
+ws.onmessage = (event) => {
+  const { t, d } = JSON.parse(event.data);
+
+  if (t === "DSMOD_VOICE") {
+    // d: VoiceConnectionDTO — фаза, участники, speaking, DAVE
+    renderCallPanel(d);                       // d.phase, d.participants, d.dave.ready
+  }
+
+  if (t === "DSMOD_SCREEN_FRAME") {
+    // d: ScreenFrame — JPEG в base64
+    preview.src = `data:image/jpeg;base64,${d.jpeg}`;
+  }
+};
 ```
 
 ## Надёжность

@@ -2,6 +2,7 @@ import type { DscClient } from "../client";
 import type { QrSession } from "../auth";
 import { DsmodError, UnauthorizedError } from "../errors";
 import { qrDataUrl } from "../qr-image";
+import type { ScreenCapture } from "./screen";
 import type { EventFrame, QrStateDTO } from "../types";
 
 /** QR отдаём картинкой — UI не подключает никаких qr-библиотек. */
@@ -34,6 +35,8 @@ export interface RouteContext {
   broadcast(frame: EventFrame): void;
   /** Разослать изменение статуса входа всем UI. */
   broadcastAuth(): Promise<void>;
+  /** Захват экрана (демонстрация экрана в UI). */
+  screen: ScreenCapture;
 }
 
 type Body = Record<string, any>;
@@ -198,6 +201,18 @@ export async function dispatch(
     if (b && method === "GET") return ctx.client.api.chat(b);
   }
 
+  // ---- звонок в ЛС: POST начать / DELETE закончить ---------------------
+  if (a === "chats" && b && c === "call") {
+    requireAuth(ctx);
+    if (method === "POST") return ctx.client.voice.join({ channelId: b, guildId: null });
+    if (method === "DELETE") {
+      if (ctx.client.voice.channelId !== b) {
+        throw new DsmodError("conflict", "Звонок идёт в другом канале (см. GET /api/voice)");
+      }
+      return ctx.client.voice.leave();
+    }
+  }
+
   if (a === "channels" && b) {
     requireAuth(ctx);
     if (c === "messages") {
@@ -219,6 +234,7 @@ export async function dispatch(
       return { ok: true };
     }
     if (c === "pins" && method === "GET") return ctx.client.api.pins(b);
+    if (!c && method === "GET") return ctx.client.api.chat(b);
   }
 
   if (a === "messages" && b && c) {
@@ -233,12 +249,78 @@ export async function dispatch(
     }
   }
 
+  // ---- голос: звонки, голосовые каналы, аудио --------------------------
+  if (a === "voice") {
+    requireAuth(ctx);
+    if (!b && method === "GET") return ctx.client.voice.status();
+    if (b === "join" && method === "POST") {
+      const body = await readBody(req);
+      if (!body.channelId) throw new DsmodError("invalid_body", "Field `channelId` is required");
+      return ctx.client.voice.join({
+        channelId: String(body.channelId),
+        guildId: body.guildId ? String(body.guildId) : null,
+        selfMute: Boolean(body.selfMute),
+        selfDeaf: Boolean(body.selfDeaf),
+      });
+    }
+    if (b === "leave" && method === "POST") return ctx.client.voice.leave();
+    if (b === "state" && method === "POST") {
+      const body = await readBody(req);
+      return ctx.client.voice.setState({
+        selfMute: body.selfMute === undefined ? undefined : Boolean(body.selfMute),
+        selfDeaf: body.selfDeaf === undefined ? undefined : Boolean(body.selfDeaf),
+      });
+    }
+    if (b === "speaking" && method === "POST") {
+      const body = await readBody(req);
+      ctx.client.voice.setSpeaking(typeof body.speaking === "number" ? body.speaking : Boolean(body.speaking));
+      return ctx.client.voice.status();
+    }
+    if (b === "audio" && method === "POST") {
+      const body = await readBody(req);
+      if (typeof body.pcm !== "string" || !body.pcm) {
+        throw new DsmodError("invalid_body", "Field `pcm` (base64) is required");
+      }
+      const pcm = Buffer.from(body.pcm, "base64");
+      if (pcm.length === 0 || pcm.length % 3840 !== 0) {
+        throw new DsmodError("invalid_body", "`pcm` должен быть кратен 3840 байтам (20 мс: s16le, 48 кГц, стерео)");
+      }
+      return { sent: ctx.client.voice.sendPcm(pcm) };
+    }
+    if (b === "options" && method === "POST") {
+      const body = await readBody(req);
+      if (body.forwardAudio !== undefined) ctx.client.voice.setForwardAudio(Boolean(body.forwardAudio));
+      return { forwardAudio: ctx.client.voice.audioForwarding };
+    }
+  }
+
+  // ---- демонстрация экрана: локальный захват кадров --------------------
+  if (a === "screen") {
+    requireAuth(ctx);
+    if (!b && method === "GET") return ctx.screen.status();
+    if (b === "start" && method === "POST") {
+      const body = await readBody(req);
+      return ctx.screen.start({
+        fps: body.fps === undefined ? undefined : Number(body.fps),
+        width: body.width === undefined ? undefined : Number(body.width),
+      });
+    }
+    if (b === "stop" && method === "POST") return ctx.screen.stop();
+  }
+
   // ---- серверы --------------------------------------------------------
   if (a === "guilds") {
     requireAuth(ctx);
     if (!b && method === "GET") return ctx.client.api.guilds();
     if (b && c === "channels" && method === "GET") return ctx.client.api.guildChats(b);
-    if (b && method === "GET") return ctx.client.api.guild(b);
+    if (b && c === "members" && method === "GET") {
+      return ctx.client.api.guildMembers(b, {
+        limit: Number(query.get("limit") ?? 100) || 100,
+        after: query.get("after") ?? undefined,
+      });
+    }
+    if (b && c === "roles" && method === "GET") return ctx.client.api.guildRoles(b);
+    if (b && !c && method === "GET") return ctx.client.api.guild(b);
   }
 
   throw new DsmodError("not_found", `Unknown route: ${method} /${parts.join("/")}`);

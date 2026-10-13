@@ -2,7 +2,8 @@ import type { QrSession } from "../auth";
 import { join } from "node:path";
 import { DscClient } from "../client";
 import { DiscordApiError, UnauthorizedError, toErrorPayload } from "../errors";
-import type { EventFrame } from "../types";
+import type { EventFrame, VoiceConnectionDTO } from "../types";
+import { ScreenCapture, type ScreenFrame, type ScreenStatus } from "./screen";
 import { dispatch, type RouteContext } from "./routes";
 
 export interface BridgeOptions {
@@ -89,6 +90,16 @@ const API_INDEX = {
     "PATCH  /api/messages/{channelId}/{messageId} {content}",
     "DELETE /api/messages/{channelId}/{messageId}",
     "GET    /api/guilds | GET /api/guilds/{id} | GET /api/guilds/{id}/channels",
+    "GET    /api/guilds/{id}/members?limit&after | GET /api/guilds/{id}/roles",
+    "GET    /api/channels/{id}",
+    "GET    /api/voice",
+    "POST   /api/voice/join {channelId,guildId?,selfMute?,selfDeaf?}",
+    "POST   /api/voice/leave | POST /api/voice/state {selfMute?,selfDeaf?}",
+    "POST   /api/voice/speaking {speaking} | POST /api/voice/audio {pcm}",
+    "POST   /api/voice/options {forwardAudio}",
+    "POST   /api/chats/{id}/call | DELETE /api/chats/{id}/call",
+    "GET    /api/screen",
+    "POST   /api/screen/start {fps?,width?} | POST /api/screen/stop",
   ],
   ws: "ws://<host>:<port>/events → {t, d, s, ts} на каждое событие Gateway",
 };
@@ -113,6 +124,7 @@ export async function startBridge(options: BridgeOptions = {}): Promise<Bridge> 
 
   let qr: QrSession | null = null;
   const subscribers = new Set<{ send(data: string): unknown }>();
+  const screen = new ScreenCapture();
 
   const broadcast = (evt: EventFrame) => {
     const payload = JSON.stringify(evt);
@@ -138,11 +150,23 @@ export async function startBridge(options: BridgeOptions = {}): Promise<Bridge> 
     },
     broadcast,
     broadcastAuth,
+    screen,
   };
 
   // Gateway → все подключённые UI
   client.on("event", (evt: EventFrame) => broadcast(evt));
   client.on("status", (status: string) => broadcast(frame("DSMOD_GATEWAY", { status })));
+  // Голос → все подключённые UI
+  client.on("voice", (dto: VoiceConnectionDTO) => broadcast(frame("DSMOD_VOICE", dto)));
+  client.on("voice-dave", (state: unknown) => broadcast(frame("DSMOD_VOICE_DAVE", state)));
+  client.on("voice-speaking", (event: unknown) => broadcast(frame("DSMOD_VOICE_SPEAKING", event)));
+  client.on("voice-audio", (event: { userId: string; pcm: Buffer }) =>
+    broadcast(frame("DSMOD_VOICE_AUDIO", { userId: event.userId, pcm: event.pcm.toString("base64") })),
+  );
+  client.on("debug", (message: unknown) => broadcast(frame("DSMOD_DEBUG", { message: String(message) })));
+  // Демонстрация экрана → все подключённые UI
+  screen.on("status", (status: ScreenStatus) => broadcast(frame("DSMOD_SCREEN_STATUS", status)));
+  screen.on("frame", (frame_: ScreenFrame) => broadcast(frame("DSMOD_SCREEN_FRAME", frame_)));
 
   const server = Bun.serve({
     hostname: host,
@@ -191,7 +215,11 @@ export async function startBridge(options: BridgeOptions = {}): Promise<Bridge> 
                 ? 404
                 : payload.code === "invalid_body"
                   ? 400
-                  : 500;
+                  : payload.code === "conflict" || payload.code === "not_in_voice"
+                    ? 409
+                    : payload.code === "gateway_required"
+                      ? 503
+                      : 500;
         return json({ ok: false, error: payload }, status);
       }
     },
@@ -224,6 +252,7 @@ export async function startBridge(options: BridgeOptions = {}): Promise<Bridge> 
     port: actualPort,
     client,
     stop() {
+      screen.stop();
       client.disconnect();
       server.stop(true);
     },

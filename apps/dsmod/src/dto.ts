@@ -1,4 +1,14 @@
-import type { AttachmentDTO, ChatDTO, EmbedDTO, GuildDTO, MessageDTO, UserDTO } from "./types";
+import type {
+  AttachmentDTO,
+  ChatDTO,
+  EmbedDTO,
+  GuildDTO,
+  GuildMemberDTO,
+  MessageDTO,
+  RoleDTO,
+  UserDTO,
+  VoiceStateDTO,
+} from "./types";
 import { ChannelType } from "./types";
 
 type Raw = Record<string, any>;
@@ -135,6 +145,49 @@ export function toGuild(guild: Raw): GuildDTO {
     memberCount: guild.member_count ?? null,
     features: Array.isArray(guild.features) ? guild.features : [],
     raw: guild,
+  };
+}
+
+/** Голосовое состояние (голосовой канал или звонок в ЛС) → DTO. */
+export function toVoiceState(raw: Raw): VoiceStateDTO {
+  return {
+    userId: String(raw.user_id ?? ""),
+    channelId: raw.channel_id ? String(raw.channel_id) : null,
+    guildId: raw.guild_id ? String(raw.guild_id) : null,
+    sessionId: String(raw.session_id ?? ""),
+    deaf: Boolean(raw.deaf),
+    mute: Boolean(raw.mute),
+    selfDeaf: Boolean(raw.self_deaf),
+    selfMute: Boolean(raw.self_mute),
+    selfVideo: Boolean(raw.self_video),
+    suppress: Boolean(raw.suppress),
+    raw,
+  };
+}
+
+/** Участник сервера (member-объект из REST) → DTO. */
+export function toGuildMember(raw: Raw): GuildMemberDTO {
+  return {
+    userId: String(raw.user?.id ?? raw.user_id ?? "0"),
+    user: raw.user ? toUser(raw.user) : null,
+    nick: raw.nick ? String(raw.nick) : null,
+    roles: Array.isArray(raw.roles) ? raw.roles.map((id: unknown) => String(id)) : [],
+    joinedAt: raw.joined_at ? String(raw.joined_at) : null,
+    raw,
+  };
+}
+
+/** Роль сервера → DTO. */
+export function toRole(raw: Raw): RoleDTO {
+  return {
+    id: String(raw.id ?? "0"),
+    name: String(raw.name ?? ""),
+    color: Number(raw.color ?? 0),
+    permissions: String(raw.permissions ?? "0"),
+    hoist: Boolean(raw.hoist),
+    mentionable: Boolean(raw.mentionable),
+    position: Number(raw.position ?? 0),
+    raw,
   };
 }
 
