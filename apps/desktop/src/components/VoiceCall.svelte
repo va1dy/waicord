@@ -1,7 +1,7 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
   import { app } from "../lib/app.svelte";
-  import { avatarOf, type VoiceStateDTO } from "../lib/api";
+  import { avatarOf, voiceAudio, type VoiceStateDTO } from "../lib/api";
 
   const voice = $derived(app.voice);
   const participants = $derived(voice?.participants ?? []);
@@ -11,7 +11,14 @@
 
   let micStream: MediaStream | null = null;
   let audioCtx: AudioContext | null = null;
+  let processor: ScriptProcessorNode | null = null;
   let pttHandler: ((e: KeyboardEvent) => void) | null = null;
+  let sendTimer: ReturnType<typeof setInterval> | null = null;
+  let pcmBuffer: Int16Array[] = [];
+
+  const FRAME_SAMPLES = 960;
+  const FRAME_BYTES = 3840;
+  const SAMPLE_RATE = 48000;
 
   $effect(() => {
     if (!isActive) {
@@ -58,26 +65,68 @@
           autoGainControl: true,
         },
       });
-      audioCtx = new AudioContext();
+      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       const source = audioCtx.createMediaStreamSource(micStream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
       source.connect(processor);
       processor.connect(audioCtx.destination);
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        const pcm16 = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        pcmBuffer.push(pcm16);
+      };
       void app.setMicActive(true);
+      void app.setSpeaking(true);
+      sendTimer = setInterval(sendPcm, 20);
     } catch {
     }
   }
 
   function stopMic() {
-    if (micStream) {
-      micStream.getTracks().forEach((t) => t.stop());
-      micStream = null;
+    if (sendTimer) {
+      clearInterval(sendTimer);
+      sendTimer = null;
+    }
+    if (processor) {
+      processor.disconnect();
+      processor = null;
     }
     if (audioCtx) {
       void audioCtx.close();
       audioCtx = null;
     }
+    if (micStream) {
+      micStream.getTracks().forEach((t) => t.stop());
+      micStream = null;
+    }
+    pcmBuffer = [];
     void app.setMicActive(false);
+    void app.setSpeaking(false);
+  }
+
+  async function sendPcm() {
+    if (pcmBuffer.length === 0) return;
+    const frames = pcmBuffer.splice(0, pcmBuffer.length);
+    const totalSamples = frames.reduce((sum, f) => sum + f.length, 0);
+    const merged = new Int16Array(totalSamples);
+    let offset = 0;
+    for (const f of frames) {
+      merged.set(f, offset);
+      offset += f.length;
+    }
+    if (merged.length % FRAME_SAMPLES !== 0) {
+      const remainder = merged.length % FRAME_SAMPLES;
+      const trimmed = merged.slice(0, merged.length - remainder);
+      if (trimmed.length > 0) {
+        void voiceAudio(trimmed);
+      }
+    } else {
+      void voiceAudio(merged);
+    }
   }
 
   async function toggleScreenShare() {

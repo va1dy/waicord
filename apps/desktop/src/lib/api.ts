@@ -266,6 +266,16 @@ export function voiceSpeaking(speaking: number | boolean): Promise<VoiceConnecti
   return request("/api/voice/speaking", { method: "POST", body: { speaking } });
 }
 
+export async function voiceAudio(pcm: Int16Array): Promise<{ sent: number }> {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return request("/api/voice/audio", { method: "POST", body: { pcm: btoa(binary) } });
+}
+
 export function voiceOptions(opts: { forwardAudio?: boolean }): Promise<{ forwardAudio: boolean }> {
   return request("/api/voice/options", { method: "POST", body: opts });
 }

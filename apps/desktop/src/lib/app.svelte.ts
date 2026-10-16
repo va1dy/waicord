@@ -276,6 +276,11 @@ class AppState {
       }
       return;
     }
+    if (t === "DSMOD_VOICE_AUDIO") {
+      const ev = d as { userId: string; pcm: string };
+      this.playPcm(ev.pcm);
+      return;
+    }
     if (t === "DSMOD_SCREEN_STATUS") {
       this.screen = d as ScreenStatusDTO;
       return;
@@ -691,6 +696,27 @@ class AppState {
   async setMicActive(active: boolean): Promise<void> {
     this.micActive = active;
     if (!active) await this.setSpeaking(false);
+  }
+
+  private audioCtx: AudioContext | null = null;
+
+  async playPcm(base64: string): Promise<void> {
+    try {
+      const raw = atob(base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const pcm16 = new Int16Array(bytes.buffer);
+      const float32 = new Float32Array(pcm16.length);
+      for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 32768;
+      if (!this.audioCtx) this.audioCtx = new AudioContext();
+      const buf = this.audioCtx.createBuffer(1, float32.length, 48000);
+      buf.copyToChannel(float32, 0);
+      const src = this.audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.audioCtx.destination);
+      src.start();
+    } catch {
+    }
   }
 
   isInVoice(): boolean {
