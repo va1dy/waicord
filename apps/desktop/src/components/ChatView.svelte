@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import Avatar from "./Avatar.svelte";
+  import VoiceCall from "./VoiceCall.svelte";
   import { app } from "../lib/app.svelte";
   import { contextMenu, type MenuItem } from "../lib/contextMenu.svelte";
   import { copyText } from "../lib/clipboard";
@@ -401,7 +402,46 @@
         </span>
       {/if}
     {/if}
+    <div class="ml-auto flex items-center gap-1">
+      {#if chat?.kind === "dm" || chat?.kind === "group"}
+        {@const inCall = app.isInVoice() && app.voice?.channelId === chat.id}
+        <button
+          type="button"
+          onclick={() => inCall ? void app.endCall(chat.id) : void app.startCall(chat.id)}
+          class="flex h-8 w-8 items-center justify-center rounded-lg transition {inCall
+            ? 'bg-danger/20 text-danger'
+            : 'text-fg-muted hover:bg-panel-soft hover:text-fg'}"
+          title={inCall ? "Завершить звонок" : "Позвонить"}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.33A19.79 19.79 0 0 1 2.18 2 2 2 0 0 1 .18-2v3a2 2 0 0 1 .54 1.45 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L3.41 10.68" />
+          </svg>
+        </button>
+      {/if}
+      <button
+        type="button"
+        onclick={() => void app.setPushToTalk(!app.pushToTalk)}
+        class="flex h-8 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition {app.pushToTalk
+          ? 'bg-accent/20 text-accent'
+          : 'text-fg-muted hover:bg-panel-soft hover:text-fg'}"
+        title="Push-to-talk"
+      >
+        PTT
+      </button>
+      <button
+        type="button"
+        onclick={() => void app.setNoiseSuppression(!app.noiseSuppression)}
+        class="flex h-8 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition {app.noiseSuppression
+          ? 'bg-accent/20 text-accent'
+          : 'text-fg-muted hover:bg-panel-soft hover:text-fg'}"
+        title="Шумоподавление"
+      >
+        NS
+      </button>
+    </div>
   </header>
+
+  <VoiceCall />
 
   <div bind:this={listEl} class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
     {#snippet segInline(seg: Seg)}

@@ -209,6 +209,97 @@ export function avatarOf(u: Pick<UserDTO, "avatarUrl" | "defaultAvatarIndex"> | 
   return u?.avatarUrl ?? (u ? defaultAvatarUrl(u) : null);
 }
 
+export interface VoiceConnectionDTO {
+  phase: "idle" | "signalling" | "connecting" | "ready" | "reconnecting" | "disconnected";
+  guildId: string | null;
+  channelId: string | null;
+  ssrc: number | null;
+  mode: string | null;
+  speaking: number;
+  closeCode: number | null;
+  dave: { version: number; ready: boolean; privacyCode: string };
+  participants: VoiceStateDTO[];
+}
+
+export interface VoiceStateDTO {
+  userId: string;
+  channelId: string | null;
+  guildId: string | null;
+  sessionId: string;
+  deaf: boolean;
+  mute: boolean;
+  selfDeaf: boolean;
+  selfMute: boolean;
+  selfVideo: boolean;
+  suppress: boolean;
+}
+
+export interface ScreenStatusDTO {
+  active: boolean;
+  fps: number;
+  width: number;
+  frames: number;
+  lastFrameAt: string | null;
+  error: string | null;
+}
+
+export function voiceStatus(): Promise<VoiceConnectionDTO> {
+  return request("/api/voice");
+}
+
+export function voiceJoin(channelId: string, guildId?: string | null): Promise<VoiceConnectionDTO> {
+  return request("/api/voice/join", {
+    method: "POST",
+    body: { channelId, guildId: guildId ?? null },
+  });
+}
+
+export function voiceLeave(): Promise<VoiceConnectionDTO> {
+  return request("/api/voice/leave", { method: "POST" });
+}
+
+export function voiceState(patch: { selfMute?: boolean; selfDeaf?: boolean }): Promise<VoiceConnectionDTO> {
+  return request("/api/voice/state", { method: "POST", body: patch });
+}
+
+export function voiceSpeaking(speaking: number | boolean): Promise<VoiceConnectionDTO> {
+  return request("/api/voice/speaking", { method: "POST", body: { speaking } });
+}
+
+export async function voiceAudio(pcm: Int16Array): Promise<{ sent: number }> {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return request("/api/voice/audio", { method: "POST", body: { pcm: btoa(binary) } });
+}
+
+export function voiceOptions(opts: { forwardAudio?: boolean }): Promise<{ forwardAudio: boolean }> {
+  return request("/api/voice/options", { method: "POST", body: opts });
+}
+
+export function callStart(chatId: string): Promise<VoiceConnectionDTO> {
+  return request(`/api/chats/${chatId}/call`, { method: "POST" });
+}
+
+export function callEnd(chatId: string): Promise<VoiceConnectionDTO> {
+  return request(`/api/chats/${chatId}/call`, { method: "DELETE" });
+}
+
+export function screenStatus(): Promise<ScreenStatusDTO> {
+  return request("/api/screen");
+}
+
+export function screenStart(opts?: { fps?: number; width?: number }): Promise<ScreenStatusDTO> {
+  return request("/api/screen/start", { method: "POST", body: opts ?? {} });
+}
+
+export function screenStop(): Promise<ScreenStatusDTO> {
+  return request("/api/screen/stop", { method: "POST" });
+}
+
 const GIPHY_KEY = "dc6zaTOxFJmzC";
 
 export async function searchGifs(query: string, limit = 12): Promise<string[]> {

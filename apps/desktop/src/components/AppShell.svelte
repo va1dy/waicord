@@ -117,27 +117,48 @@
           </div>
           {#each app.guilds as guild (guild.id)}
             {@const channels = app.guildChannels[guild.id] ?? []}
+            {@const voiceChannels = channels.filter((c) => c.type === 2 || c.type === 13)}
             <div class="mt-1">
               <p class="truncate px-2.5 py-1 text-[12px] font-semibold text-fg/90">{guild.name}</p>
               {#if channels.length === 0}
-                <p class="px-2.5 pb-1 text-[11px] text-fg-muted/60">Нет текстовых каналов</p>
+                <p class="px-2.5 pb-1 text-[11px] text-fg-muted/60">Нет каналов</p>
               {/if}
               {#each channels as ch (ch.id)}
-                <button
-                  type="button"
-                  onclick={() => void app.openChat(ch.id)}
-                  class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1 text-left transition {chatActive(ch.id)
-                    ? 'bg-panel-soft text-fg'
-                    : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
-                >
-                  <span class="text-fg-muted/60" aria-hidden="true">#</span>
-                  <span class="truncate">{ch.name}</span>
-                  {#if (app.unread[ch.id] ?? 0) > 0 && !chatActive(ch.id)}
-                    <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
-                      {app.unread[ch.id]}
-                    </span>
-                  {/if}
-                </button>
+                {#if ch.type === 2 || ch.type === 13}
+                  {@const inVoice = app.voice?.channelId === ch.id}
+                  <button
+                    type="button"
+                    onclick={() => inVoice ? void app.leaveVoice() : void app.joinVoice(ch.id, guild.id)}
+                    class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1 text-left transition {inVoice
+                      ? 'bg-emerald-500/15 text-emerald-400'
+                      : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3" />
+                    </svg>
+                    <span class="truncate">{ch.name}</span>
+                    {#if inVoice}
+                      <span class="ml-auto size-1.5 rounded-full bg-emerald-400"></span>
+                    {/if}
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    onclick={() => void app.openChat(ch.id)}
+                    class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1 text-left transition {chatActive(ch.id)
+                      ? 'bg-panel-soft text-fg'
+                      : 'text-fg-muted hover:bg-panel-soft/60 hover:text-fg'}"
+                  >
+                    <span class="text-fg-muted/60" aria-hidden="true">#</span>
+                    <span class="truncate">{ch.name}</span>
+                    {#if (app.unread[ch.id] ?? 0) > 0 && !chatActive(ch.id)}
+                      <span class="ml-auto grid min-w-5 shrink-0 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">
+                        {app.unread[ch.id]}
+                      </span>
+                    {/if}
+                  </button>
+                {/if}
               {/each}
             </div>
           {/each}

@@ -7,20 +7,34 @@ import {
   authQrState,
   authSms,
   authToken,
+  callEnd,
+  callStart,
   channelMessages,
   EVENTS_URL,
   fetchState,
   guildChannels,
   listGuilds,
+  screenStart,
+  screenStatus,
+  screenStop,
   sendMessage,
   sendTyping,
+  voiceJoin,
+  voiceLeave,
+  voiceOptions,
+  voiceSpeaking,
+  voiceState,
+  voiceStatus,
   type AuthChallenge,
   type ChatDTO,
   type EventFrame,
   type GuildDTO,
   type MessageDTO,
   type QrStateDTO,
+  type ScreenStatusDTO,
   type UserDTO,
+  type VoiceConnectionDTO,
+  type VoiceStateDTO,
 } from "./api";
 
 export type ActiveView = { kind: "friends" } | { kind: "chat"; id: string };
@@ -55,6 +69,11 @@ class AppState {
   active = $state<ActiveView>({ kind: "friends" });
   wsOpen = $state(false);
   gatewayStatus = $state("idle");
+  voice = $state<VoiceConnectionDTO | null>(null);
+  screen = $state<ScreenStatusDTO | null>(null);
+  pushToTalk = $state(false);
+  noiseSuppression = $state(true);
+  micActive = $state(false);
 
   private ws: WebSocket | null = null;
   private guildsLoaded = false;
@@ -236,6 +255,35 @@ class AppState {
         const list = this.messages[channelId];
         if (list) this.messages = { ...this.messages, [channelId]: list.filter((m) => m.id !== id) };
       }
+      return;
+    }
+
+    if (t === "DSMOD_VOICE") {
+      this.voice = d as VoiceConnectionDTO;
+      return;
+    }
+    if (t === "DSMOD_VOICE_DAVE") {
+      if (this.voice) this.voice = { ...this.voice, dave: d as VoiceConnectionDTO["dave"] };
+      return;
+    }
+    if (t === "DSMOD_VOICE_SPEAKING") {
+      const ev = d as { userId: string; ssrc: number; speaking: number };
+      if (this.voice) {
+        const participants = this.voice.participants.map((p) =>
+          p.userId === ev.userId ? { ...p, suppress: ev.speaking === 0 } : p,
+        );
+        this.voice = { ...this.voice, participants };
+      }
+      return;
+    }
+    if (t === "DSMOD_VOICE_AUDIO") {
+      const ev = d as { userId: string; pcm: string };
+      this.playPcm(ev.pcm);
+      return;
+    }
+    if (t === "DSMOD_SCREEN_STATUS") {
+      this.screen = d as ScreenStatusDTO;
+      return;
     }
   }
 
@@ -344,7 +392,7 @@ class AppState {
       for (const g of guilds) {
         try {
           const channels = await guildChannels(g.id);
-          entries[g.id] = channels.filter((c) => c.type === 0 || c.type === 5);
+          entries[g.id] = channels.filter((c) => c.type === 0 || c.type === 5 || c.type === 2 || c.type === 13);
           for (const c of entries[g.id]!) this.indexChat(c);
         } catch {
           entries[g.id] = [];
@@ -548,6 +596,135 @@ class AppState {
     const text = content.trim();
     if (!id || !text) return;
     await sendMessage(id, text);
+  }
+
+  async joinVoice(channelId: string, guildId?: string | null): Promise<void> {
+    try {
+      this.voice = await voiceJoin(channelId, guildId);
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : "Не удалось подключиться к голосу";
+    }
+  }
+
+  async leaveVoice(): Promise<void> {
+    try {
+      this.voice = await voiceLeave();
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async toggleMute(): Promise<void> {
+    if (!this.voice) return;
+    const me = this.voice.participants.find((p) => p.userId === this.me?.id);
+    const next = !this.voice.dave.ready ? false : !(me?.selfMute ?? false);
+    try {
+      this.voice = await voiceState({ selfMute: next });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async toggleDeaf(): Promise<void> {
+    if (!this.voice) return;
+    const me = this.voice.participants.find((p) => p.userId === this.me?.id);
+    const next = !(me?.selfDeaf ?? false);
+    try {
+      this.voice = await voiceState({ selfDeaf: next });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async setSpeaking(speaking: boolean): Promise<void> {
+    if (!this.voice) return;
+    try {
+      this.voice = await voiceSpeaking(speaking ? 1 : 0);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async startCall(chatId: string): Promise<void> {
+    try {
+      this.voice = await callStart(chatId);
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : "Не удалось начать звонок";
+    }
+  }
+
+  async endCall(chatId: string): Promise<void> {
+    try {
+      this.voice = await callEnd(chatId);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async startScreenShare(fps?: number, width?: number): Promise<void> {
+    try {
+      this.screen = await screenStart({ fps, width });
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : "Не удалось начать трансляцию";
+    }
+  }
+
+  async stopScreenShare(): Promise<void> {
+    try {
+      this.screen = await screenStop();
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async refreshScreenStatus(): Promise<void> {
+    try {
+      this.screen = await screenStatus();
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async setPushToTalk(enabled: boolean): Promise<void> {
+    this.pushToTalk = enabled;
+  }
+
+  async setNoiseSuppression(enabled: boolean): Promise<void> {
+    this.noiseSuppression = enabled;
+  }
+
+  async setMicActive(active: boolean): Promise<void> {
+    this.micActive = active;
+    if (!active) await this.setSpeaking(false);
+  }
+
+  private audioCtx: AudioContext | null = null;
+
+  async playPcm(base64: string): Promise<void> {
+    try {
+      const raw = atob(base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const pcm16 = new Int16Array(bytes.buffer);
+      const float32 = new Float32Array(pcm16.length);
+      for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 32768;
+      if (!this.audioCtx) this.audioCtx = new AudioContext();
+      const buf = this.audioCtx.createBuffer(1, float32.length, 48000);
+      buf.copyToChannel(float32, 0);
+      const src = this.audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.audioCtx.destination);
+      src.start();
+    } catch {
+    }
+  }
+
+  isInVoice(): boolean {
+    return this.voice !== null && this.voice.phase !== "idle" && this.voice.phase !== "disconnected";
+  }
+
+  isScreenSharing(): boolean {
+    return this.screen?.active ?? false;
   }
 }
 
