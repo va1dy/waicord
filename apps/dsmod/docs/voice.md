@@ -137,9 +137,67 @@ DAVE — сквозное шифрование звонков, **обязате�
 - статус — `ScreenStatus {active, fps, width, frames, lastFrameAt, error}`,
   события `DSMOD_SCREEN_STATUS` / `DSMOD_SCREEN_FRAME`.
 
-Это **источник кадров для UI** (превью/футаж), а не видео-стрим Discord.
+Это **источник кадров для UI** (превью/футаж), отдельно от Go Live-стрима: можно
+крутить превью в UI и одновременно транслировать экран в Discord (раздел 6).
+`/api/voice/stream` кадры не использует — там свой энкодер ffmpeg.
 
-## 6. Статус и дорожная карта
+## 6. Go Live — трансляция экрана в Discord
+
+Видеопоток в голосовой канал по схеме из
+[Discord-RE/Discord-video-stream](https://github.com/Discord-RE/Discord-video-stream):
+отдельный **stream WS** (тот же voice-gateway `?v8`, свой token из
+`STREAM_SERVER_UPDATE`), H264 из ffmpeg по UDP с транспортным AEAD.
+
+Код: `src/voice/stream.ts` (стрим-соединение и RTP), `src/voice/encoder.ts`
+(ffmpeg-процесс и автоскачивание), `src/voice/manager.ts` (`startStream` /
+`stopStream`), `src/net.ts` (WebSocket через прокси из окружения).
+
+### Эндпоинты
+
+| Метод | Путь | Тело | Ответ |
+|---|---|---|---|
+| GET | `/api/voice/stream` | — | `VoiceStreamDTO` |
+| POST | `/api/voice/stream/start` | `{width?, height?, fps?, bitrateKbps?, source?}` | `VoiceConnectionDTO` |
+| POST | `/api/voice/stream/stop` | — | `VoiceConnectionDTO` |
+
+- нужно активное голосовое подключение (`phase ready`), иначе `not_in_voice`;
+- параметры: `width` 320..1920 (по умолчанию 1280, приводится к чётному),
+  `height` 240..1080 (по умолчанию 720, чётное), `fps` 5..60 (по умолчанию 30),
+  `bitrateKbps` 500..20000 (по умолчанию 2500), `source` — вход ffmpeg, по
+  умолчанию `desktop` (весь экран; иначе — что понимает gdigrab);
+- текущий статус — `GET /api/voice` (поле `stream`) и событие `DSMOD_VOICE`.
+
+### Энкодер и ffmpeg
+
+Один процесс ffmpeg: **gdigrab → libx264 (Annex-B, `aud=1`, zerolatency) → stdout**.
+Бинарник ищется в `DSMOD_FFMPEG_PATH` / `FFMPEG_PATH` → `~/.dsmod/bin/ffmpeg.exe`
+→ PATH; если не нашёлся — **один раз скачивается автоматически** (сборка BtbN,
+~200 МБ, в `~/.dsmod/bin`) через `curl --ssl-no-revoke` + PowerShell.
+Кадры (аксесс-юниты) нарезаются по AUD-эпилогам `00 00 01 09`, превращаются в RTP
+и шлются stream-соединением. Остановка ffmpeg → `phase error` с его stderr.
+
+### Фазы (`stream.phase`)
+
+| Фаза | Что происходит |
+|---|---|
+| `idle` | не транслируем |
+| `signalling` | отправлен op18 `STREAM_CREATE`, ждём `STREAM_CREATE`/`STREAM_SERVER_UPDATE` от Gateway |
+| `connecting` | WS/UDP-хендшейк стрим-соединения |
+| `live` | кадры уходят в канал |
+| `error` | сорвалось (причина в `error`; повторный `start` — перезапуск) |
+
+### Соединение и надёжность
+
+- хендшейк повторяет голосовой: identify → ready (`streams[0].ssrc/rtx_ssrc`) →
+  IP-discovery → select protocol → session description; **RTCP Sender Report**
+  — раз в 1000 мс;
+- у стрим-WS свой heartbeat (`op6`, интервал ~13.7 c) — без обработки ack
+  клиент сам закроет WS (~55 с) и сервер ответит 4006;
+- при обрыве — resume (op7) с экспоненциальным бэкоффом;
+- прокси для стрим-WS берётся из окружения (`DSMOD_PROXY`/`HTTPS_PROXY`) —
+  как у обычного gateway.
+
+### Статус и дорожная карта
 
 **Сделано:**
 
@@ -147,13 +205,14 @@ DAVE — сквозное шифрование звонков, **обязате�
 - аудио в обе стороны (Opus/RTP, 20 мс фреймы);
 - E2EE DAVE версии 1 (автосогласование, key package, MLS-группа, privacyCode);
 - участники, speaking, фазы и DAVE-состояние наружу через DTO/события;
-- захват кадров экрана → WS (`/api/screen`, `DSMOD_SCREEN_FRAME`).
+- захват кадров экрана → WS (`/api/screen`, `DSMOD_SCREEN_FRAME`);
+- **Go Live — трансляция экрана**: `STREAM_CREATE` → стрим-WS → IP-discovery →
+  select protocol → H264 RTP + RTCP Sender Report — видео видно зрителям канала.
 
 **Не сделано (честно):**
 
-- **сам Go Live-видеопоток в Discord пока не формируется** — нет H.264 RTP/видео,
-  нет `STREAM_*`-подписок (`STREAM_CREATE` и т.п.), нет просмотра чужих стримов;
-- захват экрана — только локальные кадры для UI, в Discord видео не уходит.
+- просмотр **чужих** стримов — мы умеем только отправлять свой;
+- источник `source` кроме `desktop` (окно по hwnd) — принимается, но вслепую.
 
 Референс протокола видео — [Discord-RE/Discord-video-stream](https://github.com/Discord-RE/Discord-video-stream)
 (лицензия ISC). Спецификации и ссылки — [discord-reference.md](discord-reference.md).

@@ -222,6 +222,17 @@ export class DaveHandler {
     }
   }
 
+  /** E2EE-шифрование кадра видео H264: целиком, до нарезки на RTP. */
+  encryptVideo(frame: Buffer): Buffer {
+    if (this.protocolVersion === 0 || !this.session?.ready) return frame;
+    try {
+      return this.session.encrypt(1 /* MediaType.VIDEO */, 4 /* Codec.H264 */, frame);
+    } catch (err) {
+      this.io.onDebug?.(`dave encryptVideo: ${String(err)}`);
+      return frame;
+    }
+  }
+
   /** Расшифровка входящего пакета; null — отбрасываем (не расшифровался). */
   decrypt(userId: string, payload: Buffer): Buffer | null {
     if (this.protocolVersion === 0 || !this.session) return payload;

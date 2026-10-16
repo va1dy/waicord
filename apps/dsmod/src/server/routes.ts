@@ -292,6 +292,21 @@ export async function dispatch(
       if (body.forwardAudio !== undefined) ctx.client.voice.setForwardAudio(Boolean(body.forwardAudio));
       return { forwardAudio: ctx.client.voice.audioForwarding };
     }
+    // Go Live: трансляция экрана (docs/voice.md)
+    if (b === "stream") {
+      if (!c && method === "GET") return ctx.client.voice.status().stream;
+      if (c === "start" && method === "POST") {
+        const body = await readBody(req);
+        return ctx.client.voice.startStream({
+          width: body.width === undefined ? undefined : Number(body.width),
+          height: body.height === undefined ? undefined : Number(body.height),
+          fps: body.fps === undefined ? undefined : Number(body.fps),
+          bitrateKbps: body.bitrateKbps === undefined ? undefined : Number(body.bitrateKbps),
+          source: body.source === undefined ? undefined : String(body.source),
+        });
+      }
+      if (c === "stop" && method === "POST") return ctx.client.voice.stopStream();
+    }
   }
 
   // ---- демонстрация экрана: локальный захват кадров --------------------

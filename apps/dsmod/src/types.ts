@@ -157,6 +157,42 @@ export interface VoiceStateDTO {
   raw: Record<string, unknown>;
 }
 
+/** Фаза трансляции экрана (Go Live). */
+export type VoiceStreamPhase =
+  /** не транслируем */
+  | "idle"
+  /** отправили op18, ждём STREAM_CREATE / STREAM_SERVER_UPDATE */
+  | "signalling"
+  /** стрим-соединение проходит WS/UDP-хендшейк */
+  | "connecting"
+  /** кадры уходят в канал */
+  | "live"
+  /** трансляция сорвалась (причина в error) */
+  | "error";
+
+/** Состояние трансляции экрана (Go Live) текущего пользователя. */
+export interface VoiceStreamDTO {
+  phase: VoiceStreamPhase;
+  /** stream_key: guild:{guildId}:{channelId}:{userId} */
+  key: string | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  bitrateKbps: number | null;
+  /** ssrc видеопотока на стрим-сервере */
+  ssrc: number | null;
+  /** Режим транспортного шифрования стрим-соединения */
+  mode: string | null;
+  /** Сколько кадров отправлено с начала трансляции */
+  frames: number;
+  /** Сколько байт H264 отправлено с начала трансляции */
+  bytes: number;
+  /** ISO-8601 — когда пошли кадры */
+  startedAt: string | null;
+  /** Текст последней ошибки (phase === "error") */
+  error: string | null;
+}
+
 /** Статус голосового подключения текущего пользователя. */
 export interface VoiceConnectionDTO {
   phase: VoicePhase;
@@ -172,6 +208,8 @@ export interface VoiceConnectionDTO {
   closeCode: number | null;
   dave: VoiceDaveDTO;
   participants: VoiceStateDTO[];
+  /** Go Live: трансляция экрана (см. docs/voice.md) */
+  stream: VoiceStreamDTO;
 }
 
 /** Участник сервера — GET /api/guilds/{id}/members. */

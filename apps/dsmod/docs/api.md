@@ -118,6 +118,9 @@
 | POST | `/api/voice/options` | `{forwardAudio?}` | `{forwardAudio}` |
 | POST | `/api/chats/{id}/call` | — | `VoiceConnectionDTO` — начать звонок в ЛС |
 | DELETE | `/api/chats/{id}/call` | — | `VoiceConnectionDTO` — закончить звонок |
+| GET | `/api/voice/stream` | — | `VoiceStreamDTO` — статус трансляции экрана |
+| POST | `/api/voice/stream/start` | `{width?, height?, fps?, bitrateKbps?, source?}` | `VoiceConnectionDTO` — начать Go Live |
+| POST | `/api/voice/stream/stop` | — | `VoiceConnectionDTO` — закончить Go Live |
 
 - `guildId: null` / нет поля — звонок в ЛС (`channelId` = id чата).
 - `state`/`speaking`/`audio` без активного подключения → ошибка `not_in_voice`.
@@ -139,6 +142,9 @@
 
 `fps` — 1..10 (по умолчанию 2), `width` — 320..1920 px (по умолчанию 1280); повторный
 `start` — перезапуск с новыми параметрами. Кадры приходят событием `DSMOD_SCREEN_FRAME`.
+
+Это локальный захват для UI (превью); видео в Discord — `POST /api/voice/stream/start`
+(подробности — [voice.md](voice.md), раздел «Go Live»).
 
 ---
 
@@ -199,6 +205,12 @@
 
 Фазы переходов и таймауты — в [voice.md](voice.md).
 
+### VoiceStreamPhase
+
+`"idle" | "signalling" | "connecting" | "live" | "error"`
+
+Фазы трансляции и её устройства — в [voice.md](voice.md), раздел «Go Live».
+
 ### VoiceDaveDTO
 
 Состояние E2EE-сессии DAVE.
@@ -242,6 +254,26 @@
 | `closeCode` | number \| null | код закрытия последнего voice-WS, если обрыв уже был |
 | `dave` | `VoiceDaveDTO` | |
 | `participants` | `VoiceStateDTO[]` | участники канала |
+| `stream` | `VoiceStreamDTO` | состояние Go Live-трансляции |
+
+### VoiceStreamDTO
+
+Состояние трансляции экрана (Go Live) текущего пользователя.
+
+| Поле | Тип | Комментарий |
+|---|---|---|
+| `phase` | `VoiceStreamPhase` | |
+| `key` | string \| null | stream_key `guild:{guildId}:{channelId}:{userId}` |
+| `width` | number \| null | ширина видео в px |
+| `height` | number \| null | высота видео в px |
+| `fps` | number \| null | |
+| `bitrateKbps` | number \| null | |
+| `ssrc` | number \| null | |
+| `mode` | string \| null | режим транспортного шифрования стрим-соединения |
+| `frames` | number | кадров отправлено с начала трансляции |
+| `bytes` | number | байт H264 отправлено с начала трансляции |
+| `startedAt` | string \| null | ISO-8601 — когда пошли кадры |
+| `error` | string \| null | текст последней ошибки (`phase error`) |
 
 ### GuildMemberDTO
 

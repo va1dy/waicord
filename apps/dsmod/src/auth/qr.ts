@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { constants, createHash, generateKeyPairSync, privateDecrypt } from "node:crypto";
 import { DEFAULT_USER_AGENT } from "../config";
 import type { DiscordRest } from "../http/client";
+import { wsInit } from "../net";
 import type { QrStateDTO, QrStatus } from "../types";
 
 const GATEWAY_URL = "wss://remote-auth-gateway.discord.gg/?v=2";
@@ -112,6 +113,7 @@ export class QrSession extends EventEmitter {
           Origin: "https://discord.com",
           "User-Agent": this.options.userAgent ?? DEFAULT_USER_AGENT,
         },
+        ...wsInit(),
       } as any);
       this.ws = ws;
 

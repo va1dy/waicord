@@ -279,5 +279,30 @@ if (t === "DSMOD_SCREEN_FRAME") preview.src = `data:image/jpeg;base64,${d.jpeg}`
 ```
 
 `DSMOD_SCREEN_STATUS` — запуск/остановка/ошибка (`status.error`) — обновляй тумблер и
-счётчик `frames`. Это источник кадров для UI (превью/футаж); сам Go Live-видеопоток в
-Discord пока не формируется — см. [voice.md](voice.md), раздел «Статус и дорожная карта».
+счётчик `frames`. Это источник кадров для UI (превью/футаж); видео в Discord —
+Go Live, см. раздел 13.
+
+## 13. Go Live — трансляция экрана
+
+Настоящая демонстрация экрана: H264-поток уходит в Discord, зрители канала видят
+бейдж «LIVE» и само видео. Нужен ffmpeg (при первом старте мост скачает его сам)
+и активное голосовое подключение.
+
+```ts
+const conn = await api("/api/voice/stream/start", {
+  method: "POST",
+  body: { width: 1280, height: 720, fps: 30, bitrateKbps: 2500 },
+});
+// conn.stream.phase: "signalling" → "connecting" → "live" (или "error")
+await api("/api/voice/stream/stop", { method: "POST" });   // закончить
+const st = (await api("/api/voice")).stream;               // текущий статус
+```
+
+- фазы — `idle / signalling / connecting / live / error`; обновляй их по
+  `DSMOD_VOICE` (поле `stream` в DTO); на `live` рисуй бейдж «LIVE» и счётчик
+  `frames`/`bytes`;
+- уход из канала (`leave`) сбрасывает трансляцию сам;
+- ошибки: `not_in_voice` (сначала подключись к голосовому каналу/звонку),
+  детали — в `conn.stream.error` (например, «ffmpeg не найден» или сеть).
+
+Протокол и параметры — [voice.md](voice.md), контракт — [api.md](api.md).

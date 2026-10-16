@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { wsInit } from "./net";
 
 export type GatewayStatus = "idle" | "connecting" | "ready" | "resumed" | "reconnecting" | "closed";
 
@@ -125,6 +126,7 @@ export class GatewayClient extends EventEmitter {
           "User-Agent": this.options.userAgent,
           "Accept-Encoding": "gzip, deflate, br",
         },
+        ...wsInit(),
       } as any);
       this.ws = ws;
 

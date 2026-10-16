@@ -97,6 +97,7 @@ const API_INDEX = {
     "POST   /api/voice/leave | POST /api/voice/state {selfMute?,selfDeaf?}",
     "POST   /api/voice/speaking {speaking} | POST /api/voice/audio {pcm}",
     "POST   /api/voice/options {forwardAudio}",
+    "GET    /api/voice/stream | POST /api/voice/stream/start {width?,height?,fps?,bitrateKbps?,source?} | POST /api/voice/stream/stop",
     "POST   /api/chats/{id}/call | DELETE /api/chats/{id}/call",
     "GET    /api/screen",
     "POST   /api/screen/start {fps?,width?} | POST /api/screen/stop",

@@ -11,6 +11,7 @@
 import { EventEmitter } from "node:events";
 import dgram, { type Socket } from "node:dgram";
 import { isIPv4 } from "node:net";
+import { wsInit } from "../net";
 import { DaveHandler, DAVE_PROTOCOL_VERSION } from "./dave";
 import { FRAME_BYTES, FRAME_SAMPLES, OpusCodec } from "./opus";
 import {
@@ -173,7 +174,7 @@ export class VoiceConnection extends EventEmitter {
   private openWs(resume: boolean): void {
     const host = this.opts.endpoint.replace(/^wss?:\/\//, "");
     const url = `wss://${host}?v=${VOICE_GATEWAY_VERSION}`;
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(url, wsInit() as any);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     if (!resume) {
