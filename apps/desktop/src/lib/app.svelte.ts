@@ -74,6 +74,7 @@ class AppState {
   pushToTalk = $state(false);
   noiseSuppression = $state(true);
   micActive = $state(false);
+  lastScreenFrame = $state("");
 
   private ws: WebSocket | null = null;
   private guildsLoaded = false;
@@ -136,7 +137,7 @@ class AppState {
         this.sortChats();
         this.indexChats();
       } catch {
-        /* keep old data */
+  
       }
     })();
   }
@@ -156,7 +157,7 @@ class AppState {
       try {
         this.handle(JSON.parse(String(e.data)) as EventFrame);
       } catch {
-        /* ignore malformed */
+  
       }
     };
     this.ws = ws;
@@ -283,6 +284,11 @@ class AppState {
     }
     if (t === "DSMOD_SCREEN_STATUS") {
       this.screen = d as ScreenStatusDTO;
+      return;
+    }
+    if (t === "DSMOD_SCREEN_FRAME") {
+      const frame = d as { seq: number; ts: string; jpeg: string };
+      this.lastScreenFrame = `data:image/jpeg;base64,${frame.jpeg}`;
       return;
     }
   }
@@ -527,7 +533,7 @@ class AppState {
     try {
       await sendTyping(channelId);
     } catch {
-      /* typing is best-effort */
+
     }
   }
 
@@ -547,7 +553,7 @@ class AppState {
     try {
       await authLogout();
     } catch {
-      /* bridge may be down */
+
     }
     this.me = null;
     this.chats = [];
@@ -601,6 +607,7 @@ class AppState {
   async joinVoice(channelId: string, guildId?: string | null): Promise<void> {
     try {
       this.voice = await voiceJoin(channelId, guildId);
+      await voiceOptions({ forwardAudio: true });
     } catch (error) {
       this.error = error instanceof Error ? error.message : "Не удалось подключиться к голосу";
     }
@@ -610,7 +617,7 @@ class AppState {
     try {
       this.voice = await voiceLeave();
     } catch {
-      /* best-effort */
+
     }
   }
 
@@ -621,7 +628,7 @@ class AppState {
     try {
       this.voice = await voiceState({ selfMute: next });
     } catch {
-      /* best-effort */
+
     }
   }
 
@@ -632,7 +639,7 @@ class AppState {
     try {
       this.voice = await voiceState({ selfDeaf: next });
     } catch {
-      /* best-effort */
+
     }
   }
 
@@ -641,7 +648,7 @@ class AppState {
     try {
       this.voice = await voiceSpeaking(speaking ? 1 : 0);
     } catch {
-      /* best-effort */
+
     }
   }
 
@@ -657,7 +664,7 @@ class AppState {
     try {
       this.voice = await callEnd(chatId);
     } catch {
-      /* best-effort */
+
     }
   }
 
@@ -673,7 +680,7 @@ class AppState {
     try {
       this.screen = await screenStop();
     } catch {
-      /* best-effort */
+
     }
   }
 
@@ -681,7 +688,7 @@ class AppState {
     try {
       this.screen = await screenStatus();
     } catch {
-      /* best-effort */
+
     }
   }
 

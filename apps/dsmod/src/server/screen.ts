@@ -1,14 +1,4 @@
-/**
- * Захват экрана для «демонстрации экрана» в UI.
- *
- * Поток кадров: один фоновый процесс PowerShell (System.Drawing,
- * без внешних зависимостей) пишет base64-JPEG построчно в stdout,
- * мост парсит кадры и рассылает их подписчикам как DSMOD_SCREEN_FRAME.
- *
- * Это локальный источник кадров (превью/футаж для UI и основа для
- * будущего Go Live) — сам видео-стрим в Discord ещё не формируется
- * (см. docs/voice.md, раздел «Демонстрация экрана»).
- */
+
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
@@ -150,7 +140,7 @@ export class ScreenCapture extends EventEmitter {
     try {
       child.kill();
     } catch {
-      // процесс уже завершился
+
     }
   }
 

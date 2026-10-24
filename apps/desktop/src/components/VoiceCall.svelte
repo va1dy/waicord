@@ -8,6 +8,7 @@
   const isActive = $derived(app.isInVoice());
   const isScreenSharing = $derived(app.isScreenSharing());
   const pushToTalk = $derived(app.pushToTalk);
+  const screenFrame = $derived(app.lastScreenFrame);
 
   let micStream: MediaStream | null = null;
   let audioCtx: AudioContext | null = null;
@@ -209,4 +210,9 @@
       <p class="mt-1.5 text-[11px] text-fg-muted/60">PTT: зажми <kbd class="rounded bg-panel-soft px-1 font-mono">V</kbd></p>
     {/if}
   </div>
+  {#if isScreenSharing && screenFrame}
+    <div class="border-b border-line/60 bg-panel-soft/20 p-2">
+      <img src={screenFrame} alt="Демонстрация экрана" class="max-h-48 w-full rounded-lg object-contain" />
+    </div>
+  {/if}
 {/if}
